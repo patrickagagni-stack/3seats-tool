@@ -143,6 +143,7 @@
         <label class="row" style="gap:8px"><input id="appendExtras" type="checkbox" checked/><span class="hint">Append unmatched customer columns</span></label>
         <label class="row" style="gap:8px"><input id="includeRoomsSheet" type="checkbox" checked/><span class="hint">Include a separate "Lists" sheet</span></label>
         <button class="btn primary" id="exportBtn" disabled>Generate</button>
+        <button id="exportToSheetsBtn" class="btn primary" type="button" onclick="window.tsExportToSheets && window.tsExportToSheets()" style="margin-left:8px">Export to Google Sheet</button>
       </div>
       <div id="exportMsg" style="margin-top:10px"></div>
     </div></section>
@@ -482,7 +483,6 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
           const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
           const link=document.createElement('a'); link.href=URL.createObjectURL(blob); link.download=fname; link.click(); URL.revokeObjectURL(link.href);
           log('success',`Exported ${outRows.length} rows to ${fname}`);
-      try{ if(window.autoExportToSheets) setTimeout(window.autoExportToSheets, 50); }catch(_){ }
         }).catch(err=>log('danger','ExcelJS export error: '+(err.message||String(err))));
       } else if(fmt==='xlsx'){
         const wb=XLSX.utils.book_new();
@@ -492,7 +492,6 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
         if(!/\.xlsx$/i.test(fname)) fname=fname.replace(/\.[^/.]+$/, '')+'.xlsx';
         XLSX.writeFile(wb,fname,{bookType:'xlsx'});
         log('success',`Exported ${outRows.length} rows to ${fname}`);
-      try{ if(window.autoExportToSheets) setTimeout(window.autoExportToSheets, 50); }catch(_){ }
       } else {
         const csvHeader=headersOut.join(',');
         const csvRows=outRows.map(r=> headersOut.map(h=>{ const v=r[h]==null?'':String(r[h]); if(/[",\n]/.test(v)) return '"'+v.replace(/\"/g,'\"\"')+'"'; return v; }).join(','));
@@ -501,7 +500,6 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
         const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
         const link=document.createElement('a'); link.href=URL.createObjectURL(blob); link.download=fname; link.click(); URL.revokeObjectURL(link.href);
         log('success',`Exported ${outRows.length} rows to ${fname}`);
-      try{ if(window.autoExportToSheets) setTimeout(window.autoExportToSheets, 50); }catch(_){ }
       }
     } catch(err){ log('danger','Export error: '+(err.message||String(err))); console.error(err); } }
 
@@ -593,82 +591,224 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     // Init
     document.addEventListener('DOMContentLoaded',()=>{ try{ wireDnD(); }catch(_){} });
   </script>
-  <script async defer src="https://apis.google.com/js/api.js">
-// ==== Auto Google Sheets Sync (after Excel export) ====
-const __TS_CLIENT_ID__  = '7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com';
-const __TS_TEMPLATE_ID__= '1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE';
-const __TS_SCOPES__     = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
+  <script async defer src="https://apis.google.com/js/api.js"></script>
 
-async function __ts_gapiLoad(){ return new Promise((resolve,reject)=>{ gapi.load('client:auth2', async ()=>{ try{ await gapi.client.init({clientId: __TS_CLIENT_ID__, scope: __TS_SCOPES__}); resolve(); }catch(e){ reject(e); } }); }); }
-async function __ts_signIn(){ const a=gapi.auth2.getAuthInstance(); if(!a) throw new Error('Google auth not initialized'); if(!a.isSignedIn.get()) await a.signIn(); }
-async function __ts_copyTemplate(name){ const res=await gapi.client.request({ path:`/drive/v3/files/${encodeURIComponent(__TS_TEMPLATE_ID__)}/copy`, method:'POST', params:{fields:'id'}, body:{name} }); return res.result.id; }
-async function __ts_writeValues(id, sheet, values){ await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(sheet)}!A1`, method:'PUT', params:{ valueInputOption:'RAW' }, body:{ range:`${sheet}!A1`, majorDimension:'ROWS', values } }); }
-async function __ts_clearOrAddSheet(id, title){ try{ await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(title)}!A1:ZZ99999:clear`, method:'POST' }); }catch(e){ await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}:batchUpdate`, method:'POST', body:{ requests:[{ addSheet:{ properties:{ title } } }] } }); } }
+<script>
+(function(){
+  const CLIENT_ID  = '7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com';
+  const TEMPLATE_ID= '1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE';
+  const SCOPES     = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
 
-window.compileCurrentOutput = window.compileCurrentOutput || function(){
-  const headersOut = (master.headers||[]).slice();
-  const outRows = [];
-  const ownersSet = new Set(), roomsSet = new Set(), statusesSet = new Set();
-  const roomSepStr = (document.getElementById('roomSeps')?.value || ',/;|:').trim();
-  const roomSeps = roomSepStr.split('').filter(Boolean);
-  const splitRooms = (val)=>{ if(!val) return []; let s=String(val); for(const sep of roomSeps){ s=s.split(sep).join(','); } return s.split(',').map(v=>v.trim()).filter(Boolean); };
-
-  for(const srcRow of (customer.rows||[])){
-    const out={}; for(const key of (master.headers||[])) out[key]=srcRow[key] ?? '';
-    outRows.push(out);
-    if(srcRow.owner) ownersSet.add(String(srcRow.owner).trim());
-    if(srcRow.room) splitRooms(srcRow.room).forEach(r=> roomsSet.add(r));
-    if(srcRow.status) statusesSet.add(String(srcRow.status).trim());
+  function banner(msg, kind){
+    try{
+      let el = document.getElementById('ts-diag');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'ts-diag';
+        el.style.cssText = 'position:fixed;top:8px;left:8px;z-index:99999;font:14px/1.35 system-ui;background:#111;color:#fff;padding:8px 12px;border-radius:8px;display:none';
+        document.body.appendChild(el);
+      }
+      console[kind==='error'?'error':'log'](msg);
+      el.textContent = (kind==='error'?'❌ ':'ℹ️ ') + msg;
+      el.style.background = kind==='error' ? '#7f1d1d' : '#111';
+      el.style.display='inline-block';
+      clearTimeout(window.__tsb_to); window.__tsb_to = setTimeout(()=>{ el.style.display='none'; }, 5000);
+    }catch(_){}
   }
-  const CANON=new Set(['Prospect','Tentative','Definite','Closed','Lost']);
-  const unmatchedStatuses = Array.from(statusesSet).filter(s=> !CANON.has(s));
-  const used=new Set(master.headers||[]);
-  const extras=(customer.headers||[]).filter(h=> h && !used.has(h)).sort((a,b)=> a.localeCompare(b));
 
-  return { 
-    headersOut, 
-    outRows, 
-    lists:{ rooms:Array.from(roomsSet), owners:Array.from(ownersSet), statuses:unmatchedStatuses, nonMatched:extras }
-  };
-};
+  function scrapePreviewTable(){
+    const tables = Array.from(document.querySelectorAll('table'));
+    if (!tables.length) return null;
 
-window.autoExportToSheets = async function(){
-  try{
-    await __ts_gapiLoad(); await __ts_signIn();
-    const snap = compileCurrentOutput();
-
-    // Events
-    const eventsGrid = [ snap.headersOut, ...snap.outRows.map(r=> snap.headersOut.map(h=> r[h] ?? '')) ];
-    const fileName = (document.getElementById('fileName')?.value || 'master_output').replace(/\s+/g,'_') + ' (Google Sheet)';
-    const sheetName = document.getElementById('sheetName')?.value || 'Events';
-    const id = await __ts_copyTemplate(fileName);
-    await __ts_clearOrAddSheet(id, sheetName);
-    await __ts_writeValues(id, sheetName, eventsGrid);
-
-    // Lists (A..L, formulas in I..K)
-    const listsHeaders = ['room','room in TS','', 'owners','owners in TS','', 'status','', 'unmatched_rooms','unmatched_owners','unmatched_status','appended_headers'];
-    const rooms=snap.lists?.rooms||[]; const owners=snap.lists?.owners||[]; const statuses=snap.lists?.statuses||[]; const extras=snap.lists?.nonMatched||[];
-    const maxLen=Math.max(rooms.length, owners.length, statuses.length, extras.length, 1);
-    const listsGrid=[listsHeaders];
-    for(let i=0;i<maxLen;i++){
-      const A=rooms[i]||''; const D=owners[i]||''; const G=statuses[i]||''; const L=extras[i]||''; const row=i+2;
-      const I=`=IF(A${row}="","",IF(COUNTIF($B:$B,A${row})>0,"",A${row}))`;
-      const J=`=IF(D${row}="","",IF(COUNTIF($E:$E,D${row})>0,"",D${row}))`;
-      const K=`=IF(G${row}="","",IF(ISNUMBER(MATCH(G${row},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G${row}))`;
-      listsGrid.push([ A,'','', D,'','', G,'', I,J,K, L ]);
+    function extract(t){
+      const thead = t.querySelector('thead');
+      const tbody = t.querySelector('tbody');
+      let headers = [];
+      let dataRows = [];
+      if (thead) headers = Array.from(thead.querySelectorAll('th,td')).map(th => th.textContent.trim());
+      const rowEls = tbody ? Array.from(tbody.querySelectorAll('tr')) : Array.from(t.querySelectorAll('tr'));
+      if (!headers.length && rowEls.length) {
+        const first = rowEls.shift();
+        const firstCells = Array.from(first.querySelectorAll('th,td'));
+        headers = firstCells.map(td => td.textContent.trim());
+      }
+      for (const tr of rowEls) {
+        const cells = Array.from(tr.querySelectorAll('td,th')).map(td => td.textContent.trim());
+        if (cells.length && cells.some(v => v!=='')) dataRows.push(cells);
+      }
+      const cols = Math.max(headers.length, ...dataRows.map(r=>r.length));
+      return { headers, dataRows, rows: dataRows.length, cols };
     }
-    await __ts_clearOrAddSheet(id, 'Lists');
-    await __ts_writeValues(id, 'Lists', listsGrid);
 
-    // same window navigation
-    window.location.href = `https://docs.google.com/spreadsheets/d/${id}/edit`;
-    if(typeof log==='function') log('success','Also exported to Google Sheets (opened in this tab).');
-  }catch(e){
-    console.error(e);
-    if(typeof log==='function') log('danger','Google Sheets sync failed: '+(e.message||String(e)));
+    let best = null, score = -1;
+    for (const t of tables) {
+      const d = extract(t);
+      const s = (d.rows||0) * (d.cols||0);
+      if (d.headers && d.headers.length && d.rows && s > score) { best = d; score = s; }
+    }
+    if (!best) return null;
+
+    // Unique header names
+    const seen = {};
+    const normHeaders = best.headers.map(h => {
+      let key = (h||'').trim() || 'Column';
+      const base = key;
+      let i = 1;
+      while (seen[key]) { i+=1; key = `${base}_${i}`; }
+      seen[key] = true;
+      return key;
+    });
+
+    const outRows = best.dataRows.map(cells => {
+      const obj = {};
+      for (let i=0;i<normHeaders.length;i++) obj[normHeaders[i]] = (cells[i] ?? '').trim();
+      return obj;
+    });
+
+    return { headersOut: normHeaders, outRows };
   }
-};
 
+  function splitRoomsWithSeps(value){
+    if (!value) return [];
+    const sepStr = (document.getElementById('roomSeps')?.value || ',/;|:').trim();
+    const seps = sepStr.split('').filter(Boolean);
+    let s = String(value);
+    for (const sp of seps) s = s.split(sp).join(',');
+    return s.split(',').map(v=>v.trim()).filter(Boolean);
+  }
+
+  function computeLists(headersOut, outRows){
+    const ownersSet = new Set(), roomsSet = new Set(), statusesSet = new Set();
+    const idxOf = (needle) => {
+      const lc = headersOut.map(h => (h||'').toLowerCase());
+      const exact = lc.indexOf(needle.toLowerCase());
+      if (exact !== -1) return exact;
+      for (let i=0;i<lc.length;i++){ if (lc[i].includes(needle.toLowerCase())) return i; }
+      return -1;
+    };
+    const iOwner = idxOf('owner');
+    const iRoom  = idxOf('room');
+    const iStat  = idxOf('status');
+
+    for (const r of outRows) {
+      const vals = headersOut.map(h => r[h]);
+      if (iOwner !== -1 && vals[iOwner]) ownersSet.add(String(vals[iOwner]).trim());
+      if (iRoom  !== -1 && vals[iRoom])  splitRoomsWithSeps(vals[iRoom]).forEach(x => roomsSet.add(x));
+      if (iStat  !== -1 && vals[iStat])  statusesSet.add(String(vals[iStat]).trim());
+    }
+
+    const CANON = new Set(['Prospect','Tentative','Definite','Closed','Lost']);
+    const unmatched = Array.from(statusesSet).filter(s => !CANON.has(s));
+    return {
+      rooms: Array.from(roomsSet),
+      owners: Array.from(ownersSet),
+      statuses: unmatched,
+      nonMatched: []
+    };
+  }
+
+  async function gapiLoad(){
+    if (typeof gapi === 'undefined') throw new Error('Google API failed to load.');
+    return new Promise((resolve,reject)=>{
+      gapi.load('client', async ()=>{
+        try {
+          await gapi.client.init({}); // no auth2 here
+          resolve();
+        } catch(e){ reject(e); }
+      });
+    });
+  }); resolve(); }
+        catch(e){ reject(e); }
+      });
+    });
+  }
+  let __ts_tokenClient = null;
+  function ensureTokenClient(){
+    if (!window.google || !google.accounts || !google.accounts.oauth2) {
+      throw new Error('Google Identity Services failed to load.');
+    }
+    if (!__ts_tokenClient) {
+      __ts_tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        prompt: '', // set to 'consent' on first run if needed
+        callback: (resp) => { /* handled per request */ }
+      });
+    }
+    return __ts_tokenClient;
+  }
+  async function acquireAccessToken(forceConsent=false){
+    return new Promise((resolve, reject)=>{
+      try{
+        const tc = ensureTokenClient();
+        tc.callback = (resp)=>{
+          if (resp && resp.access_token) { resolve(resp.access_token); }
+          else { reject(new Error(resp && resp.error ? resp.error : 'Failed to obtain access token')); }
+        };
+        tc.requestAccessToken({ prompt: forceConsent ? 'consent' : '' });
+      }catch(e){ reject(e); }
+    });
+  }async function copyTemplate(name){
+    const res = await gapi.client.request({ path:`/drive/v3/files/${encodeURIComponent(TEMPLATE_ID)}/copy`, method:'POST', params:{fields:'id'}, body:{name} });
+    return res.result.id;
+  }
+  async function writeValues(id, sheet, values){
+    await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(sheet)}!A1`, method:'PUT', params:{ valueInputOption:'RAW' }, body:{ range:`${sheet}!A1`, majorDimension:'ROWS', values } });
+  }
+  async function clearOrAddSheet(id, title){
+    try { await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(title)}!A1:ZZ99999:clear`, method:'POST' }); }
+    catch { await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}:batchUpdate`, method:'POST', body:{ requests:[{ addSheet:{ properties:{ title } } }] } }); }
+  }
+
+  window.tsExportToSheets = async function(){
+    try{
+      banner('Reading table from page...');
+      const snap = scrapePreviewTable();
+      if (!snap || !snap.headersOut.length || !snap.outRows.length) {
+        banner('No table detected. Please run your normal Generate so the results table is visible.', 'error');
+        return;
+      }
+
+      const eventsGrid = [ snap.headersOut, ...snap.outRows.map(r => snap.headersOut.map(h => r[h] ?? '')) ];
+
+      const lists = computeLists(snap.headersOut, snap.outRows);
+      const listsHeaders = ['room','room in TS','', 'owners','owners in TS','', 'status','', 'unmatched_rooms','unmatched_owners','unmatched_status','appended_headers'];
+      const maxLen = Math.max(lists.rooms.length, lists.owners.length, lists.statuses.length, lists.nonMatched.length, 1);
+      const listsGrid = [listsHeaders];
+      for (let i=0;i<maxLen;i++){
+        const A=lists.rooms[i]||'', D=lists.owners[i]||'', G=lists.statuses[i]||'', L=lists.nonMatched[i]||''; const row=i+2;
+        const I=`=IF(A${row}="","",IF(COUNTIF($B:$B,A${row})>0,"",A${row}))`;
+        const J=`=IF(D${row}="","",IF(COUNTIF($E:$E,D${row})>0,"",D${row}))`;
+        const K=`=IF(G${row}="","",IF(ISNUMBER(MATCH(G${row},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G${row}))`;
+        listsGrid.push([A,'','',D,'','',G,'',I,J,K,L]);
+      }
+
+      await gapiLoad(); banner('Google API loaded. Getting token...');
+      const tok = await acquireAccessToken();
+      gapi.client.setToken({ access_token: tok });
+      banner('Token acquired. Creating sheet...');
+
+      const sheetName = document.getElementById('sheetName')?.value || 'Events';
+      const fileName  = (document.getElementById('fileName')?.value || 'master_output').replace(/\s+/g,'_') + ' (Google Sheet)';
+      const id = await copyTemplate(fileName);
+
+      banner('Writing data...');
+      await clearOrAddSheet(id, sheetName);
+      await writeValues(id, sheetName, eventsGrid);
+      await clearOrAddSheet(id, 'Lists');
+      await writeValues(id, 'Lists', listsGrid);
+
+      banner('Opening Google Sheet...');
+      window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`, '_blank');
+      banner('Done');
+    }catch(e){
+      console.error(e);
+      banner('Export failed: ' + (e.message || String(e)), 'error');
+    }
+  };
+})();
 </script>
+
+  <script async defer src="https://accounts.google.com/gsi/client"></script>
 </body>
 </html>
