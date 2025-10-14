@@ -143,7 +143,7 @@
         <label class="row" style="gap:8px"><input id="appendExtras" type="checkbox" checked/><span class="hint">Append unmatched customer columns</span></label>
         <label class="row" style="gap:8px"><input id="includeRoomsSheet" type="checkbox" checked/><span class="hint">Include a separate "Lists" sheet</span></label>
         <button class="btn primary" id="exportBtn" disabled>Generate</button>
-        <button class="btn" id="exportToSheetsBtn" type="button" title="Create a Google Sheet from the current preview/mapping" style="margin-left:8px;border:2px solid #3b82f6">Export to Google Sheet (Debug v3)</button>
+        <button class="btn" id="exportToSheetsBtn" type="button" title="Create a Google Sheet from the current preview/mapping" style="margin-left:8px;border:2px solid #3b82f6">Export to Google Sheet (Debug v4)</button>
       </div>
       <div id="exportMsg" style="margin-top:10px"></div>
     </div></section>
@@ -598,84 +598,21 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 (function(){
   const CLIENT_ID  = '7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com';
   const TEMPLATE_ID= '1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE';
-  const SCOPES     = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
+  const SCOPES     = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets';
 
-  function stringifySafe(o){
-    try { return typeof o === 'string' ? o : JSON.stringify(o, Object.getOwnPropertyNames(o)); }
-    catch { try { return JSON.stringify(o); } catch { return String(o); } }
-  }
-  function extractGapiError(err){
-    try {
-      if (err && err.result && err.result.error) {
-        const e = err.result.error;
-        return e.message || e.status || stringifySafe(e);
-      }
-      if (err && err.body) return err.body;
-      if (err && err.message) return err.message;
-      return stringifySafe(err);
-    } catch(_){ return String(err); }
-  }
   function banner(msg, kind){
-    const text = typeof msg === 'string' ? msg : stringifySafe(msg);
+    const text = typeof msg === 'string' ? msg : (function(o){ try { return JSON.stringify(o); } catch { return String(o); } }) (msg);
     console[kind==='error'?'error':'log']('[DBG]', text);
     let el = document.getElementById('ts-diag');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'ts-diag';
-      el.style.cssText = 'position:fixed;top:8px;left:8px;z-index:99999;font:14px/1.4 system-ui;background:#111;color:#fff;padding:8px 12px;border-radius:10px;max-width:70vw;box-shadow:0 6px 20px rgba(0,0,0,.35)';
-      document.body.appendChild(el);
-    }
+    if (!el) { el = document.createElement('div'); el.id = 'ts-diag'; el.style.cssText = 'position:fixed;top:8px;left:8px;z-index:99999;font:14px/1.4 system-ui;background:#111;color:#fff;padding:8px 12px;border-radius:10px;max-width:70vw;box-shadow:0 6px 20px rgba(0,0,0,.35)'; document.body.appendChild(el); }
     el.textContent = (kind==='error'?'❌ ':'ℹ️ ') + text;
     el.style.background = kind==='error' ? '#7f1d1d' : '#111';
   }
-  window.onerror = (m,s,l,c,e)=>banner({type:'window.onerror', message:m, src:s, line:l, col:c, stack:e&&e.stack},'error');
-  window.addEventListener('unhandledrejection', e=>banner({type:'unhandledrejection', reason: stringifySafe(e.reason)},'error'));
   function step(n, text){ banner('Step '+n+': '+text); }
-  async function safe(label, fn){
-    try { step(label, 'start'); const r = await fn(); step(label, 'ok'); return r; }
-    catch(e){ banner(label+' error: '+extractGapiError(e), 'error'); throw e; }
-  }
-
-  function scrape(){
-    const tables = Array.from(document.querySelectorAll('table'));
-    if (!tables.length) return null;
-    function extract(t){
-      const thead=t.querySelector('thead'), tbody=t.querySelector('tbody');
-      let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll('th,td')).map(x=>x.textContent.trim());
-      const rows=[]; const rowEls = tbody ? Array.from(tbody.querySelectorAll('tr')) : Array.from(t.querySelectorAll('tr'));
-      if (!headers.length && rowEls.length){ const first=rowEls.shift(); headers = Array.from(first.querySelectorAll('th,td')).map(x=>x.textContent.trim()); }
-      for (const tr of rowEls){ const cells=Array.from(tr.querySelectorAll('td,th')).map(x=>x.textContent.trim()); if (cells.some(v=>v!=='')) rows.push(cells); }
-      const cols=Math.max(headers.length, ...rows.map(r=>r.length));
-      return { headers, rows, score:(rows.length||0)*(cols||0) };
-    }
-    let best=null;
-    for (const t of tables){ const d=extract(t); if (d.headers.length && d.rows.length && (!best || d.score>best.score)) best=d; }
-    if (!best) return null;
-    const seen={}; const normHeaders = best.headers.map(h=>{ let k=(h||'').trim()||'Column', b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
-    const outRows = best.rows.map(cells=>{ const o={}; for(let i=0;i<normHeaders.length;i++) o[normHeaders[i]]=(cells[i]??'').trim(); return o; });
-    return { headersOut:normHeaders, outRows };
-  }
-  function splitRooms(val){ if(!val) return []; let s=String(val); for(const sp of [',','/',';','|',':']) s=s.split(sp).join(','); return s.split(',').map(v=>v.trim()).filter(Boolean); }
-  function computeLists(headersOut, outRows){
-    const owners=new Set(), rooms=new Set(), statuses=new Set();
-    const idx=(needle)=>{ const lc=headersOut.map(h=>(h||'').toLowerCase()); const e=lc.indexOf(needle.toLowerCase()); if(e!==-1) return e; for(let i=0;i<lc.length;i++) if(lc[i].includes(needle.toLowerCase())) return i; return -1; };
-    const iOwner=idx('owner'), iRoom=idx('room'), iStat=idx('status');
-    for(const r of outRows){
-      const vals=headersOut.map(h=>r[h]);
-      if(iOwner!==-1&&vals[iOwner]) owners.add(String(vals[iOwner]).trim());
-      if(iRoom!==-1&&vals[iRoom]) splitRooms(vals[iRoom]).forEach(x=>rooms.add(x));
-      if(iStat!==-1&&vals[iStat]) statuses.add(String(vals[iStat]).trim());
-    }
-    const CANON=new Set(['Prospect','Tentative','Definite','Closed','Lost']);
-    const unmatched=[...statuses].filter(s=>!CANON.has(s));
-    return { rooms:[...rooms], owners:[...owners], statuses:unmatched, nonMatched:[] };
-  }
-
   async function gapiLoad(){
     if (typeof gapi === 'undefined') throw new Error('gapi undefined (serve from GitHub Pages or http://localhost)');
     return new Promise((resolve,reject)=>{ gapi.load('client', async ()=>{ try{ await gapi.client.init({}); resolve(); }catch(e){ reject(e); } }); });
   }
-
   let tokenClient=null;
   function ensureTokenClient(){
     if (!window.google || !google.accounts || !google.accounts.oauth2) throw new Error('Google Identity Services not loaded');
@@ -691,45 +628,55 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     return new Promise((resolve,reject)=>{
       try{
         const tc=ensureTokenClient();
-        tc.callback=(r)=>{
-          if(r && r.access_token) return resolve(r.access_token);
-          banner({where:'token', raw:r}, 'error');
-          reject(new Error(r && r.error ? r.error : 'No token received'));
-        };
+        tc.callback=(r)=>{ if(r && r.access_token) return resolve(r.access_token); banner({where:'token', raw:r}, 'error'); reject(new Error(r && r.error ? r.error : 'No token received')); };
         tc.requestAccessToken({ prompt: forceConsent ? 'consent' : 'select_account' });
       }catch(e){ reject(e); }
     });
   }
-
+  function scrape(){
+    const tables = Array.from(document.querySelectorAll('table')); if (!tables.length) return null;
+    function extract(t){
+      const thead=t.querySelector('thead'), tbody=t.querySelector('tbody');
+      let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll('th,td')).map(x=>x.textContent.trim());
+      const rows=[]; const rowEls = tbody ? Array.from(tbody.querySelectorAll('tr')) : Array.from(t.querySelectorAll('tr'));
+      if (!headers.length && rowEls.length){ const first=rowEls.shift(); headers = Array.from(first.querySelectorAll('th,td')).map(x=>x.textContent.trim()); }
+      for (const tr of rowEls){ const cells=Array.from(tr.querySelectorAll('td,th')).map(x=>x.textContent.trim()); if (cells.some(v=>v!=='')) rows.push(cells); }
+      const cols=Math.max(headers.length, ...rows.map(r=>r.length));
+      return { headers, rows, score:(rows.length||0)*(cols||0) };
+    }
+    let best=null; for (const t of tables){ const d=extract(t); if (d.headers.length && d.rows.length && (!best || d.score>best.score)) best=d; }
+    if (!best) return null;
+    const seen={}; const normHeaders = best.headers.map(h=>{ let k=(h||'').trim()||'Column', b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
+    const outRows = best.rows.map(cells=>{ const o={}; for(let i=0;i<normHeaders.length;i++) o[normHeaders[i]]=(cells[i]??'').trim(); return o; });
+    return { headersOut:normHeaders, outRows };
+  }
+  function splitRooms(val){ if(!val) return []; let s=String(val); for(const sp of [',','/',';','|',':']) s=s.split(sp).join(','); return s.split(',').map(v=>v.trim()).filter(Boolean); }
+  function computeLists(headersOut, outRows){
+    const owners=new Set(), rooms=new Set(), statuses=new Set();
+    const idx=(needle)=>{ const lc=headersOut.map(h=>(h||'').toLowerCase()); const e=lc.indexOf(needle.toLowerCase()); if(e!==-1) return e; for(let i=0;i<lc.length;i++) if(lc[i].includes(needle.toLowerCase())) return i; return -1; };
+    const iOwner=idx('owner'), iRoom=idx('room'), iStat=idx('status');
+    for(const r of outRows){ const vals=headersOut.map(h=>r[h]); if(iOwner!==-1&&vals[iOwner]) owners.add(String(vals[iOwner]).trim()); if(iRoom!==-1&&vals[iRoom]) splitRooms(vals[iRoom]).forEach(x=>rooms.add(x)); if(iStat!==-1&&vals[iStat]) statuses.add(String(vals[iStat]).trim()); }
+    const CANON=new Set(['Prospect','Tentative','Definite','Closed','Lost']); const unmatched=[...statuses].filter(s=>!CANON.has(s));
+    return { rooms:[...rooms], owners:[...owners], statuses:unmatched, nonMatched:[] };
+  }
   async function copyTemplate(name){
-    return safe('copyTemplate', async()=>{
-      const res = await gapi.client.request({ path:`/drive/v3/files/${encodeURIComponent(TEMPLATE_ID)}/copy`, method:'POST', params:{fields:'id'}, body:{ name } });
-      if (!res.result || !res.result.id) throw new Error('Drive copy returned no file id');
-      banner('Copy ID '+res.result.id);
-      return res.result.id;
-    });
+    const res = await gapi.client.request({ path:`/drive/v3/files/${encodeURIComponent(TEMPLATE_ID)}/copy`, method:'POST', params:{fields:'id', supportsAllDrives:true}, body:{ name } });
+    if (!res.result || !res.result.id) throw new Error('Drive copy returned no file id');
+    banner('Copy ID '+res.result.id);
+    return res.result.id;
   }
   async function writeValues(id, sheet, values){
-    return safe('writeValues '+sheet, async()=>{
-      return await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(sheet)}!A1`, method:'PUT', params:{ valueInputOption:'RAW' }, body:{ range:`${sheet}!A1`, majorDimension:'ROWS', values } });
-    });
+    await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(sheet)}!A1`, method:'PUT', params:{ valueInputOption:'RAW' }, body:{ range:`${sheet}!A1`, majorDimension:'ROWS', values } });
   }
   async function clearOrAddSheet(id, title){
-    return safe('clearOrAddSheet '+title, async()=>{
-      try {
-        await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(title)}!A1:ZZ99999:clear`, method:'POST' });
-      } catch(e) {
-        await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}:batchUpdate`, method:'POST', body:{ requests:[{ addSheet: { properties: { title } } }] } });
-      }
-    });
+    try { await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(title)}!A1:ZZ99999:clear`, method:'POST' }); }
+    catch { await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}:batchUpdate`, method:'POST', body:{ requests:[{ addSheet: { properties: { title } } }] } }); }
   }
-
   async function exportToSheetsDebug(){
     try{
       step(1,'Start');
       const newTab = window.open('about:blank','_blank');
-      const snap = scrape();
-      if (!snap || !snap.headersOut.length || !snap.outRows.length) { banner('No table detected. Run your normal Generate first.','error'); if(newTab) newTab.close(); return; }
+      const snap = scrape(); if (!snap || !snap.headersOut.length || !snap.outRows.length) { banner('No table detected. Run Generate first.','error'); if(newTab) newTab.close(); return; }
       step(2,`Scraped ${snap.outRows.length} rows / ${snap.headersOut.length} cols`);
       const eventsGrid = [ snap.headersOut, ...snap.outRows.map(r => snap.headersOut.map(h => r[h] ?? '')) ];
       const lists = computeLists(snap.headersOut, snap.outRows);
@@ -743,10 +690,11 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
         listsGrid.push([A,'','',D,'','',G,'',I,J,K,L]);
       }
       step(3,'Load gapi'); await gapiLoad();
-      step(3.5,'Token (FedCM)'); const tok = await acquireToken(true); gapi.client.setToken({ access_token: tok });
+      step(3.5,'Token (FedCM + drive)'); const tok = await acquireToken(true); gapi.client.setToken({ access_token: tok });
       const sheetName = (document.getElementById('sheetName')?.value || 'Events').trim() || 'Events';
       const fileName  = ((document.getElementById('fileName')?.value || 'master_output').trim() || 'master_output').replace(/\s+/g,'_') + ' (Google Sheet)';
       const id = await copyTemplate(fileName);
+      step(5,'Write sheets');
       await clearOrAddSheet(id, sheetName);
       await writeValues(id, sheetName, eventsGrid);
       await clearOrAddSheet(id, 'Lists');
@@ -755,11 +703,9 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
       step(8,'Done');
     }catch(e){
       console.error(e);
-      banner('Export failed: '+extractGapiError(e), 'error');
-      banner('Stack: '+(e && e.stack || 'n/a'), 'error');
+      banner('Export failed: '+(e && (e.result && e.result.error && e.result.error.message) || e.message || JSON.stringify(e)), 'error');
     }
   }
-
   document.addEventListener('DOMContentLoaded', ()=>{
     const b = document.getElementById('exportToSheetsBtn');
     if (b) b.addEventListener('click', exportToSheetsDebug);
