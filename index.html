@@ -143,7 +143,7 @@
         <label class="row" style="gap:8px"><input id="appendExtras" type="checkbox" checked/><span class="hint">Append unmatched customer columns</span></label>
         <label class="row" style="gap:8px"><input id="includeRoomsSheet" type="checkbox" checked/><span class="hint">Include a separate "Lists" sheet</span></label>
         <button class="btn primary" id="exportBtn" disabled>Generate</button>
-        <button class="btn" id="exportToSheetsBtn" type="button" title="Create a Google Sheet from the current preview/mapping" style="margin-left:8px;border:2px solid #3b82f6">Export to Google Sheet (Debug v2)</button>
+        <button class="btn" id="exportToSheetsBtn" type="button" title="Create a Google Sheet from the current preview/mapping" style="margin-left:8px;border:2px solid #3b82f6">Export to Google Sheet (Debug v3)</button>
       </div>
       <div id="exportMsg" style="margin-top:10px"></div>
     </div></section>
@@ -600,8 +600,24 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
   const TEMPLATE_ID= '1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE';
   const SCOPES     = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
 
+  function stringifySafe(o){
+    try { return typeof o === 'string' ? o : JSON.stringify(o, Object.getOwnPropertyNames(o)); }
+    catch { try { return JSON.stringify(o); } catch { return String(o); } }
+  }
+  function extractGapiError(err){
+    try {
+      if (err && err.result && err.result.error) {
+        const e = err.result.error;
+        return e.message || e.status || stringifySafe(e);
+      }
+      if (err && err.body) return err.body;
+      if (err && err.message) return err.message;
+      return stringifySafe(err);
+    } catch(_){ return String(err); }
+  }
   function banner(msg, kind){
-    console[kind==='error'?'error':'log']('[DBG]', msg);
+    const text = typeof msg === 'string' ? msg : stringifySafe(msg);
+    console[kind==='error'?'error':'log']('[DBG]', text);
     let el = document.getElementById('ts-diag');
     if (!el) {
       el = document.createElement('div');
@@ -609,12 +625,16 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
       el.style.cssText = 'position:fixed;top:8px;left:8px;z-index:99999;font:14px/1.4 system-ui;background:#111;color:#fff;padding:8px 12px;border-radius:10px;max-width:70vw;box-shadow:0 6px 20px rgba(0,0,0,.35)';
       document.body.appendChild(el);
     }
-    el.textContent = (kind==='error'?'❌ ':'ℹ️ ') + msg;
+    el.textContent = (kind==='error'?'❌ ':'ℹ️ ') + text;
     el.style.background = kind==='error' ? '#7f1d1d' : '#111';
   }
-  window.onerror = (m,s,l,c,e)=>banner('JS error: '+m+' @'+s+':'+l,'error');
-  window.addEventListener('unhandledrejection', e=>banner('Promise rejection: '+(e.reason && e.reason.message || e.reason),'error'));
+  window.onerror = (m,s,l,c,e)=>banner({type:'window.onerror', message:m, src:s, line:l, col:c, stack:e&&e.stack},'error');
+  window.addEventListener('unhandledrejection', e=>banner({type:'unhandledrejection', reason: stringifySafe(e.reason)},'error'));
   function step(n, text){ banner('Step '+n+': '+text); }
+  async function safe(label, fn){
+    try { step(label, 'start'); const r = await fn(); step(label, 'ok'); return r; }
+    catch(e){ banner(label+' error: '+extractGapiError(e), 'error'); throw e; }
+  }
 
   function scrape(){
     const tables = Array.from(document.querySelectorAll('table'));
@@ -673,6 +693,7 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
         const tc=ensureTokenClient();
         tc.callback=(r)=>{
           if(r && r.access_token) return resolve(r.access_token);
+          banner({where:'token', raw:r}, 'error');
           reject(new Error(r && r.error ? r.error : 'No token received'));
         };
         tc.requestAccessToken({ prompt: forceConsent ? 'consent' : 'select_account' });
@@ -681,19 +702,26 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
   }
 
   async function copyTemplate(name){
-    step(4,'Copying template');
-    const res = await gapi.client.request({ path:`/drive/v3/files/${encodeURIComponent(TEMPLATE_ID)}/copy`, method:'POST', params:{fields:'id'}, body:{ name } });
-    if (!res.result || !res.result.id) throw new Error('Drive copy returned no file id');
-    step(4.5,'Copy ID '+res.result.id);
-    return res.result.id;
+    return safe('copyTemplate', async()=>{
+      const res = await gapi.client.request({ path:`/drive/v3/files/${encodeURIComponent(TEMPLATE_ID)}/copy`, method:'POST', params:{fields:'id'}, body:{ name } });
+      if (!res.result || !res.result.id) throw new Error('Drive copy returned no file id');
+      banner('Copy ID '+res.result.id);
+      return res.result.id;
+    });
   }
   async function writeValues(id, sheet, values){
-    step(6, `Writing ${sheet} (${values.length-1} rows)`);
-    await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(sheet)}!A1`, method:'PUT', params:{ valueInputOption:'RAW' }, body:{ range:`${sheet}!A1`, majorDimension:'ROWS', values } });
+    return safe('writeValues '+sheet, async()=>{
+      return await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(sheet)}!A1`, method:'PUT', params:{ valueInputOption:'RAW' }, body:{ range:`${sheet}!A1`, majorDimension:'ROWS', values } });
+    });
   }
   async function clearOrAddSheet(id, title){
-    try { step(5,`Clearing "${title}"`); await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(title)}!A1:ZZ99999:clear`, method:'POST' }); }
-    catch { step(5.1,`Adding "${title}"`); await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}:batchUpdate`, method:'POST', body:{ requests:[{ addSheet: { properties: { title } } }] } }); }
+    return safe('clearOrAddSheet '+title, async()=>{
+      try {
+        await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(title)}!A1:ZZ99999:clear`, method:'POST' });
+      } catch(e) {
+        await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}:batchUpdate`, method:'POST', body:{ requests:[{ addSheet: { properties: { title } } }] } });
+      }
+    });
   }
 
   async function exportToSheetsDebug(){
@@ -725,7 +753,11 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
       await writeValues(id, 'Lists', listsGrid);
       step(7,'Open sheet'); if (newTab) newTab.location.href = `https://docs.google.com/spreadsheets/d/${id}/edit`; else window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`,'_blank');
       step(8,'Done');
-    }catch(e){ console.error(e); banner('Export failed: '+(e.message||String(e)),'error'); }
+    }catch(e){
+      console.error(e);
+      banner('Export failed: '+extractGapiError(e), 'error');
+      banner('Stack: '+(e && e.stack || 'n/a'), 'error');
+    }
   }
 
   document.addEventListener('DOMContentLoaded', ()=>{
