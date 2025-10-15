@@ -596,337 +596,71 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 
 <script>
 (function(){
-  const CLIENT_ID   = "7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com";
-  const TEMPLATE_ID = "1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
-  const SCOPES      = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets";
+  const CLIENT_ID="7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com";
+  const TEMPLATE_ID="1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
+  const SCOPES="https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets";
+
+  document.addEventListener("DOMContentLoaded",()=>{
+    const b=document.getElementById("exportToSheetsBtn");
+    if (b) b.addEventListener("click", exportToSheets);
+  });
 
   async function gapiBoot(){
-    await new Promise((resolve,reject)=>{ gapi.load("client", async ()=>{ try{ await gapi.client.init({}); resolve(); }catch(e){ reject(e); } }); });
+    await new Promise((res,rej)=>{ gapi.load("client", async ()=>{ try{ await gapi.client.init({}); res(); }catch(e){ rej(e); } }); });
     await gapi.client.load("https://www.googleapis.com/discovery/v1/apis/drive/v3/rest");
     await gapi.client.load("https://sheets.googleapis.com/$discovery/rest?version=v4");
   }
   let tokenClient=null;
-  async function acquireToken(forceConsent=false){
-    if (!tokenClient) tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID, scope: SCOPES, use_fedcm_for_prompt: true, callback: ()=>{}
-    });
-    return new Promise((resolve,reject)=>{
-      tokenClient.callback = (resp)=> resp && resp.access_token ? resolve(resp.access_token) : reject(new Error(resp && resp.error || "No token"));
-      tokenClient.requestAccessToken({ prompt: forceConsent ? "consent" : "select_account" });
-    });
+  async function getToken(){ if(!tokenClient) tokenClient=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID, scope:SCOPES, use_fedcm_for_prompt:true, callback:()=>{}});
+    return new Promise((resolve,reject)=>{ tokenClient.callback=(r)=>r&&r.access_token?resolve(r.access_token):reject(new Error(r?.error||"no token")); tokenClient.requestAccessToken({prompt:"consent"}); });
   }
+  async function driveCopy(id,name){ const r=await gapi.client.drive.files.copy({fileId:id,supportsAllDrives:true,fields:"id",resource:{name}}); return r.result.id; }
+  async function waitReady(id){ for(let i=1;i<=10;i++){ try{ const r=await gapi.client.sheets.spreadsheets.get({spreadsheetId:id,fields:"spreadsheetId"}); if(r?.result?.spreadsheetId) return; }catch(_){}
+      await new Promise(r=>setTimeout(r, 400*i)); } throw new Error("Sheet not ready after copy."); }
+  async function ensureSheet(id,title){ try{ await gapi.client.sheets.spreadsheets.values.clear({spreadsheetId:id,range:`${title}!A1:ZZ99999`}); } catch(_) { await gapi.client.sheets.spreadsheets.batchUpdate({spreadsheetId:id, resource:{requests:[{addSheet:{properties:{title}}}]}}); } }
+  async function writeRAW(id,title,values){ await gapi.client.sheets.spreadsheets.values.update({spreadsheetId:id,range:`${title}!A1`,valueInputOption:"RAW",resource:{majorDimension:"ROWS",values}}); }
+  async function writeUSER(id,title,values){ await gapi.client.sheets.spreadsheets.values.update({spreadsheetId:id,range:`${title}!A1`,valueInputOption:"USER_ENTERED",resource:{majorDimension:"ROWS",values}}); }
 
-  async function driveCopy(templateId, name){
-    const res = await gapi.client.drive.files.copy({ fileId: templateId, supportsAllDrives: true, fields: "id", resource: { name } });
-    return res.result.id;
-  }
-  async function waitForSheetReady(id){
-    for (let i=1;i<=10;i++){
-      try { const r = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: id, fields: "spreadsheetId" }); if (r && r.result && r.result.spreadsheetId) return; }
-      catch(_){}
-      await new Promise(r=>setTimeout(r, 400*i));
-    }
-    throw new Error("Sheet not ready after copy.");
-  }
-  async function clearValuesOnly(id, title){
-    await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: id, range: `${title}!A1:ZZ99999` });
-  }
-  async function ensureSheetExists(id, title){
-    try { await clearValuesOnly(id, title); }
-    catch { await gapi.client.sheets.spreadsheets.batchUpdate({
-              spreadsheetId: id, resource: { requests: [{ addSheet: { properties: { title } } }] }
-            }); }
-  }
-  async function writeValuesRAW(id, title, values){
-    await gapi.client.sheets.spreadsheets.values.update({
-      spreadsheetId: id, range: `${title}!A1`, valueInputOption: "RAW",
-      resource: { majorDimension: "ROWS", values }
-    });
-  }
-  async function writeValuesUSER(id, title, values){
-    await gapi.client.sheets.spreadsheets.values.update({
-      spreadsheetId: id, range: `${title}!A1`, valueInputOption: "USER_ENTERED",
-      resource: { majorDimension: "ROWS", values }
-    });
-  }
+  function norm(s){ return String(s||'').toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim(); }
 
-  function getAllTableData(){
-    const t = document.querySelector("table");
-    if (!t) return null;
-    const hasDT = (window.jQuery && jQuery.fn && jQuery.fn.dataTable) || (window.DataTable && typeof window.DataTable === "function");
-    if (hasDT) {
-      try {
-        const api = jQuery && jQuery.fn && jQuery.fn.dataTable ? jQuery(t).DataTable() : new DataTable(t);
-        const headers = Array.from(t.querySelectorAll("thead th, thead td")).map(x=>x.textContent.trim());
-        const rows = api.rows({ search:"applied" }).data().toArray().map(arr=>arr.map(cell=>{ const div=document.createElement('div'); div.innerHTML=String(cell); return div.textContent.trim(); }));
-        const seen={}; const H=headers.map(h=>{ let k=(h||"").trim()||"Column", b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
-        const outRows = rows.map(r=>{ const o={}; for(let i=0;i<H.length;i++) o[H[i]]=(r[i]??"").trim(); return o; });
-        return { headersOut:H, outRows };
-      } catch(_){}
-    }
-    function extract(tab){
-      const thead=tab.querySelector("thead"), tbody=tab.querySelector("tbody");
-      let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll("th,td")).map(x=>x.textContent.trim());
-      const rowEls = tbody ? Array.from(tbody.querySelectorAll("tr")) : Array.from(tab.querySelectorAll("tr"));
-      const bodyRows = rowEls.map(tr=>Array.from(tr.querySelectorAll("td,th")).map(td=>td.textContent.trim()));
-      if (!headers.length && bodyRows.length) { headers = bodyRows.shift(); }
-      const seen={}; const H=headers.map(h=>{ let k=(h||"").trim()||"Column", b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
-      const outRows = bodyRows.filter(r=>r.some(v=>v!=="")).map(r=>{ const o={}; for(let i=0;i<H.length;i++) o[H[i]]=(r[i]??"").trim(); return o; });
-      return { headersOut:H, outRows };
-    }
-    return extract(t);
-  }
-
-  function splitRooms(val){
-    if(!val) return []; let s=String(val); for(const sp of [",","/",";","|",":"]) s=s.split(sp).join(","); return s.split(",").map(v=>v.trim()).filter(Boolean);
-  }
-  function computeLists(headersOut, outRows){
-    const owners=new Set(), rooms=new Set(), statuses=new Set();
-    const idx=(needle)=>{ const lc=headersOut.map(h=>(h||"").toLowerCase()); const e=lc.indexOf(needle.toLowerCase()); if(e!==-1) return e; for(let i=0;i<lc.length;i++) if(lc[i].includes(needle.toLowerCase())) return i; return -1; };
-    const iOwner=idx("owner"), iRoom=idx("room"), iStat=idx("status");
-    for(const r of outRows){
-      const vals=headersOut.map(h=>r[h]);
-      if(iOwner!==-1&&vals[iOwner]) owners.add(String(vals[iOwner]).trim());
-      if(iRoom!==-1&&vals[iRoom]) splitRooms(vals[iRoom]).forEach(x=>rooms.add(x));
-      if(iStat!==-1&&vals[iStat]) statuses.add(String(vals[iStat]).trim());
-    }
-    const CANON=new Set(["Prospect","Tentative","Definite","Closed","Lost"]);
-    const unmatched=[...statuses].filter(s=>!CANON.has(s));
-    return { rooms:[...rooms], owners:[...owners], statuses:unmatched, nonMatched:[] };
-  }
-
-  async function exportToSheets(){
-    try{
-      const snap = getAllTableData();
-      if (!snap || !snap.headersOut.length || !snap.outRows.length) { alert("No table detected (or no rows). Run your normal Generate first."); return; }
-
-      const eventsGrid = [ snap.headersOut, ...snap.outRows.map(r => snap.headersOut.map(h => r[h] ?? "")) ];
-      const lists = computeLists(snap.headersOut, snap.outRows);
-      const headers = ["room","room in TS","", "owners","owners in TS","", "status","", "unmatched_rooms","unmatched_owners","unmatched_status","appended_headers"];
-      const maxLen = Math.max(lists.rooms.length, lists.owners.length, lists.statuses.length, lists.nonMatched.length, 1);
-      const listsGrid = [headers];
-      for (let i=0;i<maxLen;i++){
-        const A=lists.rooms[i]||"", D=lists.owners[i]||"", G=lists.statuses[i]||"", L=lists.nonMatched[i]||"";
-        const row=i+2;
-        const I=`=IF(A${row}="","",IF(COUNTIF($B:$B,A${row})>0,"",A${row}))`;
-        const J=`=IF(D${row}="","",IF(COUNTIF($E:$E,D${row})>0,"",D${row}))`;
-        const K=`=IF(G${row}="","",IF(ISNUMBER(MATCH(G${row},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G${row}))`;
-        listsGrid.push([A,"","",D,"","",G,"",I,J,K,L]);
-      }
-
-      await gapiBoot();
-      const tok = await acquireToken(true);
-      gapi.client.setToken({ access_token: tok });
-
-      const sheetName = (document.getElementById("sheetName")?.value || "Events").trim() || "Events";
-      const fileName  = ((document.getElementById("fileName")?.value || "master_output").trim() || "master_output").replace(/\s+/g,"_") + " (Google Sheet)";
-
-      const id = await driveCopy(TEMPLATE_ID, fileName);
-      await waitForSheetReady(id);
-
-      await ensureSheetExists(id, sheetName);
-      await ensureSheetExists(id, "Lists");
-
-      await writeValuesRAW(id, sheetName, eventsGrid);
-      await writeValuesUSER(id, "Lists", listsGrid);
-
-      window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`, "_blank");
-    }catch(e){
-      console.error(e);
-      alert("Export failed: " + (e && (e.result?.error?.message || e.message) || String(e)));
-    }
-  }
-
-  document.addEventListener("DOMContentLoaded", ()=>{
-    const b = document.getElementById("exportToSheetsBtn");
-    if (b) b.addEventListener("click", exportToSheets);
-  });
-})();
-</script>
-
-<script async defer src="https://apis.google.com/js/api.js"></script>
-<script async defer src="https://accounts.google.com/gsi/client"></script>
-<script>
-(function(){
-  const CLIENT_ID   = "7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com";
-  const TEMPLATE_ID = "1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
-  const SCOPES      = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets";
-
-  // Add the button next to your existing Export button if it's not there already.
-  document.addEventListener("DOMContentLoaded", ()=>{
-    const anchorBtn = document.querySelector('#exportBtn');
-    if (anchorBtn && !document.getElementById('exportToSheetsBtn')) {
-      const b = document.createElement('button');
-      b.className = 'btn';
-      b.id = 'exportToSheetsBtn';
-      b.type = 'button';
-      b.style.marginLeft = '8px';
-      b.textContent = 'Export to Google Sheet';
-      anchorBtn.insertAdjacentElement('afterend', b);
-    }
-    const b = document.getElementById("exportToSheetsBtn");
-    if (b) b.addEventListener("click", exportToSheets);
-  });
-
-  // ---- Google boot ----
-  async function gapiBoot(){
-    await new Promise((resolve,reject)=>{ gapi.load("client", async ()=>{ try{ await gapi.client.init({}); resolve(); }catch(e){ reject(e); } }); });
-    await gapi.client.load("https://www.googleapis.com/discovery/v1/apis/drive/v3/rest");
-    await gapi.client.load("https://sheets.googleapis.com/$discovery/rest?version=v4");
-  }
-  let tokenClient=null;
-  async function acquireToken(forceConsent=false){
-    if (!tokenClient) tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID, scope: SCOPES, use_fedcm_for_prompt: true, callback: ()=>{}
-    });
-    return new Promise((resolve,reject)=>{
-      tokenClient.callback = (resp)=> resp && resp.access_token ? resolve(resp.access_token) : reject(new Error(resp && resp.error || "No token"));
-      tokenClient.requestAccessToken({ prompt: forceConsent ? "consent" : "select_account" });
-    });
-  }
-
-  // ---- Drive/Sheets helpers ----
-  async function driveCopy(templateId, name){
-    const res = await gapi.client.drive.files.copy({ fileId: templateId, supportsAllDrives: true, fields: "id", resource: { name } });
-    return res.result.id;
-  }
-  async function waitForSheetReady(id){
-    for (let i=1;i<=10;i++){
-      try { const r = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: id, fields: "spreadsheetId" }); if (r?.result?.spreadsheetId) return; }
-      catch(_){}
-      await new Promise(r=>setTimeout(r, 400*i));
-    }
-    throw new Error("Sheet not ready after copy.");
-  }
-  async function clearValuesOnly(id, title){
-    await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: id, range: `${title}!A1:ZZ99999` });
-  }
-  async function ensureSheetExists(id, title){
-    try { await clearValuesOnly(id, title); }
-    catch { await gapi.client.sheets.spreadsheets.batchUpdate({
-      spreadsheetId: id, resource: { requests: [{ addSheet: { properties: { title } } }] }
-    }); }
-  }
-  async function writeValuesRAW(id, title, values){
-    await gapi.client.sheets.spreadsheets.values.update({
-      spreadsheetId: id, range: `${title}!A1`, valueInputOption: "RAW",
-      resource: { majorDimension: "ROWS", values }
-    });
-  }
-  async function writeValuesUSER(id, title, values){
-    await gapi.client.sheets.spreadsheets.values.update({
-      spreadsheetId: id, range: `${title}!A1`, valueInputOption: "USER_ENTERED",
-      resource: { majorDimension: "ROWS", values }
-    });
-  }
-
-  // ---- Get ALL rows (3 strategies) ----
-  function tryGlobalData(){
-    try{
-      const keys = Object.keys(window);
-      for (const k of keys){
-        const v = window[k];
-        if (Array.isArray(v) && v.length >= 20 && typeof v[0] === "object"){
-          const cols = Object.keys(v[0]); if (!cols.length) continue;
-          let consistent = true;
-          for (let i=1;i<Math.min(v.length,200);i++){ const ki=Object.keys(v[i]); if (ki.length !== cols.length) { consistent = false; break; } }
-          if (!consistent) continue;
-          const headers = cols;
-          const outRows = v.map(row => { const o={}; for (const h of headers) o[h] = row[h]==null?"":String(row[h]).trim(); return o; });
-          return { headersOut: headers, outRows, source: "global:"+k };
+  function getData(){
+    // 1) Prefer the parsed Excel data (customer.headers / customer.rows)
+    try {
+      if (typeof customer!=='undefined' && Array.isArray(customer.rows) && customer.rows.length){
+        if (Array.isArray(customer.headers) && customer.headers.length){
+          return { headersOut: customer.headers.slice(), outRows: customer.rows.slice(), source: 'customer' };
         }
       }
-    }catch(_){}
-    return null;
-  }
-  function tryDataTables(){
-    const t = document.querySelector("table");
-    if (!t) return null;
-    const hasDT = (window.jQuery && jQuery.fn && jQuery.fn.dataTable) || (window.DataTable && typeof window.DataTable === "function");
-    if (!hasDT) return null;
-    try {
-      const api = jQuery && jQuery.fn && jQuery.fn.dataTable ? jQuery(t).DataTable() : new DataTable(t);
-      const headers = Array.from(t.querySelectorAll("thead th, thead td")).map(x=>x.textContent.trim());
-      const rows = api.rows({ search:"applied" }).data().toArray().map(arr=>arr.map(cell=>{
-        const div=document.createElement('div'); div.innerHTML=String(cell); return div.textContent.trim();
-      }));
-      const seen={}; const H=headers.map(h=>{ let k=(h||"").trim()||"Column", b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
-      const outRows = rows.map(r=>{ const o={}; for(let i=0;i<H.length;i++) o[H[i]]=(r[i]??"").trim(); return o; });
-      return { headersOut:H, outRows, source:"datatables" };
-    } catch(_){ return null; }
-  }
-  async function scrapeAllPages(){
-    const table = document.querySelector("table");
-    if (!table) return null;
-    function extractCurrent(){
-      const thead=table.querySelector("thead"), tbody=table.querySelector("tbody");
-      let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll("th,td")).map(x=>x.textContent.trim());
-      const rowEls = tbody ? Array.from(tbody.querySelectorAll("tr")) : Array.from(table.querySelectorAll("tr"));
-      const bodyRows = rowEls.map(tr=>Array.from(tr.querySelectorAll("td,th")).map(td=>td.textContent.trim()));
-      if (!headers.length && bodyRows.length) { headers = bodyRows.shift(); }
-      const rows = bodyRows.filter(r=>r.some(v=>v!==""));
-      return { headers, rows };
-    }
-    const nextSelectors = ['.paginate_button.next', 'button[aria-label="Next"]', 'a[aria-label="Next"]', 'a[rel="next"]', 'button.next', 'a.next'];
-    let clickNext = null;
-    for (const sel of nextSelectors){ const el = document.querySelector(sel); if (el){ clickNext = el; break; } }
-    const allRows=[]; let headers=[];
-    async function onePage(){ const {headers:h, rows} = extractCurrent(); if (!headers.length && h.length) headers=h; allRows.push(...rows); }
-    await onePage();
-    let guard=0;
-    while (clickNext && !clickNext.classList.contains("disabled") && guard<200){
-      guard++;
-      const before = table.innerText.length;
-      clickNext.click();
-      let tries=0;
-      while (tries<20){
-        await new Promise(r=>setTimeout(r, 150));
-        const after = table.innerText.length;
-        if (after !== before) break;
-        tries++;
-      }
-      await onePage();
-      let newBtn = null;
-      for (const sel of nextSelectors){ const el = document.querySelector(sel); if (el){ newBtn=el; break; } }
-      if (!newBtn || newBtn === clickNext) break;
-      clickNext = newBtn;
-    }
-    if (!headers.length) return null;
-    const seen={}, H=headers.map(h=>{ let k=(h||"").trim()||"Column", b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
-    const outRows = allRows.map(r=>{ const o={}; for(let i=0;i<H.length;i++) o[H[i]]=(r[i]??"").trim(); return o; });
-    return { headersOut:H, outRows, source:"pagination" };
-  }
-  async function getAllTableData(){
-    const g = tryGlobalData(); if (g && g.outRows.length) return g;
-    const d = tryDataTables(); if (d && d.outRows.length) return d;
-    const s = await scrapeAllPages(); if (s && s.outRows.length) return s;
-    // Fallback: single page scrape
-    const table = document.querySelector("table");
-    if (!table) return null;
-    const thead=table.querySelector("thead"), tbody=table.querySelector("tbody");
-    let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll("th,td")).map(x=>x.textContent.trim());
-    const rowEls = tbody ? Array.from(tbody.querySelectorAll("tr")) : Array.from(table.querySelectorAll("tr"));
-    const bodyRows = rowEls.map(tr=>Array.from(tr.querySelectorAll("td,th")).map(td=>td.textContent.trim()));
-    if (!headers.length && bodyRows.length) { headers = bodyRows.shift(); }
-    const seen={}; const H=headers.map(h=>{ let k=(h||"").trim()||"Column", b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
-    const outRows = bodyRows.filter(r=>r.some(v=>v!=="")).map(r=>{ const o={}; for(let i=0;i<H.length;i++) o[H[i]]=(r[i]??"").trim(); return o; });
-    return { headersOut:H, outRows, source:"single" };
+    } catch(_){}
+    // 2) Fallback: scrape visible table (DOM)
+    const t=document.querySelector('table'); if(!t) return null;
+    const thead=t.querySelector('thead'), tbody=t.querySelector('tbody');
+    let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll('th,td')).map(x=>x.textContent.trim());
+    const rowEls = tbody ? Array.from(tbody.querySelectorAll('tr')) : Array.from(t.querySelectorAll('tr'));
+    const bodyRows = rowEls.map(tr=>Array.from(tr.querySelectorAll('td,th')).map(td=>td.textContent.trim()));
+    if (!headers.length && bodyRows.length){ headers = bodyRows.shift(); }
+    const seen={}; const H=headers.map(h=>{ let k=(h||'').trim()||'Column', b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
+    const outRows = bodyRows.filter(r=>r.some(v=>v!=='')).map(r=>{ const o={}; for(let i=0;i<H.length;i++) o[H[i]]=(r[i]??'').trim(); return o; });
+    return { headersOut:H, outRows, source:'dom' };
   }
 
-  function splitRooms(val){
-    if(!val) return []; let s=String(val);
-    for(const sp of [",","/",";","|",":"]) s=s.split(sp).join(",");
-    return s.split(",").map(v=>v.trim()).filter(Boolean);
-  }
   function computeLists(headersOut, outRows){
     const owners=new Set(), rooms=new Set(), statuses=new Set();
-    const idx=(needle)=>{ const lc=headersOut.map(h=>(h||"").toLowerCase()); const e=lc.indexOf(needle.toLowerCase()); if(e!==-1) return e; for(let i=0;i<lc.length;i++) if(lc[i].includes(needle.toLowerCase())) return i; return -1; };
-    const iOwner=idx("owner"), iRoom=idx("room"), iStat=idx("status");
+    const lc=headersOut.map(h=>norm(h));
+    const find=(names)=>{ for(const n of names){ const i=lc.indexOf(norm(n)); if(i!==-1) return i; } for(let i=0;i<lc.length;i++){ if(names.some(n=>lc[i].includes(norm(n)))) return i; } return -1; };
+    const iRoom=find(['room']);
+    let iOwner=find(['owner','owner name','owner full','primary contact','contact']);
+    const iOwnerFirst=find(['owner first','first name']);
+    const iOwnerLast=find(['owner last','last name']);
+    const iStatus=find(['event status','status']);
     for(const r of outRows){
       const vals=headersOut.map(h=>r[h]);
-      if(iOwner!==-1&&vals[iOwner]) owners.add(String(vals[iOwner]).trim());
-      if(iRoom!==-1&&vals[iRoom]) splitRooms(vals[iRoom]).forEach(x=>rooms.add(x));
-      if(iStat!==-1&&vals[iStat]) statuses.add(String(vals[iStat]).trim());
+      if(iRoom!==-1 && vals[iRoom]) String(vals[iRoom]).split(/[,/;|:]/).map(s=>s.trim()).filter(Boolean).forEach(x=>rooms.add(x));
+      let ownerVal='';
+      if(iOwner!==-1 && vals[iOwner]) ownerVal=String(vals[iOwner]).trim();
+      else if(iOwnerFirst!==-1||iOwnerLast!==-1) ownerVal=[vals[iOwnerFirst]||'', vals[iOwnerLast]||''].join(' ').trim();
+      if(ownerVal) owners.add(ownerVal);
+      if(iStatus!==-1 && vals[iStatus]) statuses.add(String(vals[iStatus]).trim());
     }
     const CANON=new Set(["Prospect","Tentative","Definite","Closed","Lost"]);
     const unmatched=[...statuses].filter(s=>!CANON.has(s));
@@ -935,48 +669,27 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 
   async function exportToSheets(){
     try{
-      const snap = await getAllTableData();
-      if (!snap || !snap.headersOut.length || !snap.outRows.length) { alert("No table detected (or no rows). Run your normal Generate first."); return; }
-
-      const eventsGrid = [ snap.headersOut, ...snap.outRows.map(r => snap.headersOut.map(h => r[h] ?? "")) ];
-      const lists = computeLists(snap.headersOut, snap.outRows);
-      const headers = ["room","room in TS","", "owners","owners in TS","", "status","", "unmatched_rooms","unmatched_owners","unmatched_status","appended_headers"];
-      const maxLen = Math.max(lists.rooms.length, lists.owners.length, lists.statuses.length, lists.nonMatched.length, 1);
-      const listsGrid = [headers];
-      for (let i=0;i<maxLen;i++){
-        const A=lists.rooms[i]||"", D=lists.owners[i]||"", G=lists.statuses[i]||"", L=lists.nonMatched[i]||"";
-        const row=i+2;
-        const I=`=IF(A${row}="","",IF(COUNTIF($B:$B,A${row})>0,"",A${row}))`;
-        const J=`=IF(D${row}="","",IF(COUNTIF($E:$E,D${row})>0,"",D${row}))`;
-        const K=`=IF(G${row}="","",IF(ISNUMBER(MATCH(G${row},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G${row}))`;
-        listsGrid.push([A,"","",D,"","",G,"",I,J,K,L]);
-      }
-
-      // Auth + copy
-      await gapiBoot();
-      const tok = await acquireToken(true);
-      gapi.client.setToken({ access_token: tok });
-
-      const sheetName = (document.getElementById("sheetName")?.value || "Events").trim() || "Events";
-      const fileName  = ((document.getElementById("fileName")?.value || "master_output").trim() || "master_output").replace(/\s+/g,"_") + " (Google Sheet)";
-
-      const id = await driveCopy(TEMPLATE_ID, fileName);
-      await waitForSheetReady(id);
-
-      // IMPORTANT: For preserved formatting, create these sheets (once) in the template and style them.
-      await ensureSheetExists(id, sheetName);
-      await ensureSheetExists(id, "Lists");
-
-      await writeValuesRAW(id, sheetName, eventsGrid);
-      await writeValuesUSER(id, "Lists", listsGrid);
-
-      window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`, "_blank");
-    }catch(e){
-      console.error(e);
-      alert("Export failed: " + (e && (e.result?.error?.message || e.message) || String(e)));
-    }
+      const snap=getData();
+      if(!snap || !snap.headersOut.length || !snap.outRows.length){ alert('No table detected (or no rows). Run Generate first.'); return; }
+      const eventsGrid=[ snap.headersOut, ...snap.outRows.map(r => snap.headersOut.map(h => r[h] ?? "")) ];
+      const lists=computeLists(snap.headersOut, snap.outRows);
+      const headers=["room","room in TS","", "owners","owners in TS","", "status","", "unmatched_rooms","unmatched_owners","unmatched_status","appended_headers"];
+      const len=Math.max(lists.rooms.length, lists.owners.length, lists.statuses.length, lists.nonMatched.length, 1);
+      const listGrid=[headers];
+      for(let i=0;i<len;i++){ const A=lists.rooms[i]||"", D=lists.owners[i]||"", G=lists.statuses[i]||"", L=lists.nonMatched[i]||"";
+        const r=i+2; const I=`=IF(A${r}="","",IF(COUNTIF($B:$B,A${r})>0,"",A${r}))`; const J=`=IF(D${r}="","",IF(COUNTIF($E:$E,D${r})>0,"",D${r}))`; const K=`=IF(G${r}="","",IF(ISNUMBER(MATCH(G${r},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G${r}))`;
+        listGrid.push([A,"","",D,"","",G,"",I,J,K,L]); }
+      await gapiBoot(); const tok=await getToken(); gapi.client.setToken({access_token:tok});
+      const sheetName=(document.getElementById('sheetName')?.value||'Events').trim()||'Events';
+      const fileName=((document.getElementById('fileName')?.value||'master_output').trim()||'master_output').replace(/\s+/g,'_')+' (Google Sheet)';
+      const id=await driveCopy(TEMPLATE_ID, fileName); await waitReady(id);
+      await ensureSheet(id, sheetName); await ensureSheet(id, 'Lists');
+      await writeRAW(id, sheetName, eventsGrid); await writeUSER(id, 'Lists', listGrid);
+      window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`,'_blank');
+    }catch(e){ console.error(e); alert('Export failed: '+(e?.result?.error?.message||e.message||String(e))); }
   }
 })();
 </script>
+
 </body>
 </html>
