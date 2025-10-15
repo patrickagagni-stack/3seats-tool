@@ -143,7 +143,7 @@
         <label class="row" style="gap:8px"><input id="appendExtras" type="checkbox" checked/><span class="hint">Append unmatched customer columns</span></label>
         <label class="row" style="gap:8px"><input id="includeRoomsSheet" type="checkbox" checked/><span class="hint">Include a separate "Lists" sheet</span></label>
         <button class="btn primary" id="exportBtn" disabled>Generate</button>
-        <button class="btn" id="exportToSheetsBtn" type="button" title="Create a Google Sheet from the current preview/mapping" style="margin-left:8px;border:2px solid #3b82f6">Export to Google Sheet (Debug v4)</button>
+        <button class="btn" id="exportToSheetsBtn" type="button" title="Create a Google Sheet from the current preview/mapping" style="margin-left:8px;">Export to Google Sheet</button>
       </div>
       <div id="exportMsg" style="margin-top:10px"></div>
     </div></section>
@@ -596,26 +596,57 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 
 <script>
 (function(){
-  const CLIENT_ID  = '7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com';
-  const TEMPLATE_ID= '1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE';
-  const SCOPES     = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets';
+  const CLIENT_ID   = "7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com";
+  const TEMPLATE_ID = "1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
+  const SCOPES      = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets";
 
-  function banner(msg, kind){
-    const text = typeof msg === 'string' ? msg : (function(o){ try { return JSON.stringify(o); } catch { return String(o); } }) (msg);
-    console[kind==='error'?'error':'log']('[DBG]', text);
-    let el = document.getElementById('ts-diag');
-    if (!el) { el = document.createElement('div'); el.id = 'ts-diag'; el.style.cssText = 'position:fixed;top:8px;left:8px;z-index:99999;font:14px/1.4 system-ui;background:#111;color:#fff;padding:8px 12px;border-radius:10px;max-width:70vw;box-shadow:0 6px 20px rgba(0,0,0,.35)'; document.body.appendChild(el); }
-    el.textContent = (kind==='error'?'❌ ':'ℹ️ ') + text;
-    el.style.background = kind==='error' ? '#7f1d1d' : '#111';
+  function scrapeLargestTable(){
+    const tables = Array.from(document.querySelectorAll("table"));
+    if (!tables.length) return null;
+    function extract(t){
+      const thead=t.querySelector("thead"), tbody=t.querySelector("tbody");
+      let headers=[];
+      if (thead) headers = Array.from(thead.querySelectorAll("th,td")).map(x=>x.textContent.trim());
+      const rows=[], rowEls = tbody ? Array.from(tbody.querySelectorAll("tr")) : Array.from(t.querySelectorAll("tr"));
+      if (!headers.length && rowEls.length){ const first=rowEls.shift(); headers = Array.from(first.querySelectorAll("th,td")).map(x=>x.textContent.trim()); }
+      for (const tr of rowEls){ const cells=Array.from(tr.querySelectorAll("td,th")).map(x=>x.textContent.trim()); if (cells.some(v=>v!=="")) rows.push(cells); }
+      const cols=Math.max(headers.length, ...rows.map(r=>r.length));
+      return { headers, rows, score:(rows.length||0)*(cols||0) };
+    }
+    let best=null, bestScore=-1;
+    for (const t of tables){ const d=extract(t); if (d.headers.length && d.rows.length && d.score>bestScore){ best=d; bestScore=d.score; } }
+    if (!best) return null;
+    const seen={}; const H = best.headers.map(h=>{ let k=(h||"").trim()||"Column", b=k, i=1; while(seen[k]){i++;k=`${b}_${i}`;} seen[k]=true; return k; });
+    const R = best.rows.map(cells=>{ const o={}; for(let i=0;i<H.length;i++) o[H[i]]=(cells[i]??"").trim(); return o; });
+    return { headersOut:H, outRows:R };
   }
-  function step(n, text){ banner('Step '+n+': '+text); }
-  async function gapiLoad(){
-    if (typeof gapi === 'undefined') throw new Error('gapi undefined (serve from GitHub Pages or http://localhost)');
-    return new Promise((resolve,reject)=>{ gapi.load('client', async ()=>{ try{ await gapi.client.init({}); resolve(); }catch(e){ reject(e); } }); });
+
+  function splitRooms(val){ if(!val) return []; let s=String(val); for(const sp of [",","/",";","|",":"]) s=s.split(sp).join(","); return s.split(",").map(v=>v.trim()).filter(Boolean); }
+  function computeLists(headersOut, outRows){
+    const owners=new Set(), rooms=new Set(), statuses=new Set();
+    const idx=(needle)=>{ const lc=headersOut.map(h=>(h||"").toLowerCase()); const e=lc.indexOf(needle.toLowerCase()); if(e!==-1) return e; for(let i=0;i<lc.length;i++) if(lc[i].includes(needle.toLowerCase())) return i; return -1; };
+    const iOwner=idx("owner"), iRoom=idx("room"), iStat=idx("status");
+    for(const r of outRows){
+      const vals=headersOut.map(h=>r[h]);
+      if(iOwner!==-1&&vals[iOwner]) owners.add(String(vals[iOwner]).trim());
+      if(iRoom!==-1&&vals[iRoom]) splitRooms(vals[iRoom]).forEach(x=>rooms.add(x));
+      if(iStat!==-1&&vals[iStat]) statuses.add(String(vals[iStat]).trim());
+    }
+    const CANON=new Set(["Prospect","Tentative","Definite","Closed","Lost"]);
+    const unmatched=[...statuses].filter(s=>!CANON.has(s));
+    return { rooms:[...rooms], owners:[...owners], statuses:unmatched, nonMatched:[] };
   }
+
+  async function gapiBoot(){
+    if (typeof gapi === "undefined") throw new Error("Google API not loaded (page must be served from HTTPS)");
+    await new Promise((resolve,reject)=>{ gapi.load("client", async ()=>{ try{ await gapi.client.init({}); resolve(); } catch(e){ reject(e); } }); });
+    await gapi.client.load("https://www.googleapis.com/discovery/v1/apis/drive/v3/rest");
+    await gapi.client.load("https://sheets.googleapis.com/$discovery/rest?version=v4");
+  }
+
   let tokenClient=null;
   function ensureTokenClient(){
-    if (!window.google || !google.accounts || !google.accounts.oauth2) throw new Error('Google Identity Services not loaded');
+    if (!window.google || !google.accounts || !google.accounts.oauth2) throw new Error("Google Identity Services not loaded");
     if (!tokenClient) tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: CLIENT_ID,
       scope: SCOPES,
@@ -626,89 +657,96 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
   }
   async function acquireToken(forceConsent=false){
     return new Promise((resolve,reject)=>{
-      try{
-        const tc=ensureTokenClient();
-        tc.callback=(r)=>{ if(r && r.access_token) return resolve(r.access_token); banner({where:'token', raw:r}, 'error'); reject(new Error(r && r.error ? r.error : 'No token received')); };
-        tc.requestAccessToken({ prompt: forceConsent ? 'consent' : 'select_account' });
-      }catch(e){ reject(e); }
+      try {
+        const tc = ensureTokenClient();
+        tc.callback = (resp)=>{
+          if (resp && resp.access_token) return resolve(resp.access_token);
+          reject(new Error(resp && resp.error ? resp.error : "No token"));
+        };
+        tc.requestAccessToken({ prompt: forceConsent ? "consent" : "select_account" });
+      } catch (e) { reject(e); }
     });
   }
-  function scrape(){
-    const tables = Array.from(document.querySelectorAll('table')); if (!tables.length) return null;
-    function extract(t){
-      const thead=t.querySelector('thead'), tbody=t.querySelector('tbody');
-      let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll('th,td')).map(x=>x.textContent.trim());
-      const rows=[]; const rowEls = tbody ? Array.from(tbody.querySelectorAll('tr')) : Array.from(t.querySelectorAll('tr'));
-      if (!headers.length && rowEls.length){ const first=rowEls.shift(); headers = Array.from(first.querySelectorAll('th,td')).map(x=>x.textContent.trim()); }
-      for (const tr of rowEls){ const cells=Array.from(tr.querySelectorAll('td,th')).map(x=>x.textContent.trim()); if (cells.some(v=>v!=='')) rows.push(cells); }
-      const cols=Math.max(headers.length, ...rows.map(r=>r.length));
-      return { headers, rows, score:(rows.length||0)*(cols||0) };
-    }
-    let best=null; for (const t of tables){ const d=extract(t); if (d.headers.length && d.rows.length && (!best || d.score>best.score)) best=d; }
-    if (!best) return null;
-    const seen={}; const normHeaders = best.headers.map(h=>{ let k=(h||'').trim()||'Column', b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
-    const outRows = best.rows.map(cells=>{ const o={}; for(let i=0;i<normHeaders.length;i++) o[normHeaders[i]]=(cells[i]??'').trim(); return o; });
-    return { headersOut:normHeaders, outRows };
-  }
-  function splitRooms(val){ if(!val) return []; let s=String(val); for(const sp of [',','/',';','|',':']) s=s.split(sp).join(','); return s.split(',').map(v=>v.trim()).filter(Boolean); }
-  function computeLists(headersOut, outRows){
-    const owners=new Set(), rooms=new Set(), statuses=new Set();
-    const idx=(needle)=>{ const lc=headersOut.map(h=>(h||'').toLowerCase()); const e=lc.indexOf(needle.toLowerCase()); if(e!==-1) return e; for(let i=0;i<lc.length;i++) if(lc[i].includes(needle.toLowerCase())) return i; return -1; };
-    const iOwner=idx('owner'), iRoom=idx('room'), iStat=idx('status');
-    for(const r of outRows){ const vals=headersOut.map(h=>r[h]); if(iOwner!==-1&&vals[iOwner]) owners.add(String(vals[iOwner]).trim()); if(iRoom!==-1&&vals[iRoom]) splitRooms(vals[iRoom]).forEach(x=>rooms.add(x)); if(iStat!==-1&&vals[iStat]) statuses.add(String(vals[iStat]).trim()); }
-    const CANON=new Set(['Prospect','Tentative','Definite','Closed','Lost']); const unmatched=[...statuses].filter(s=>!CANON.has(s));
-    return { rooms:[...rooms], owners:[...owners], statuses:unmatched, nonMatched:[] };
-  }
-  async function copyTemplate(name){
-    const res = await gapi.client.request({ path:`/drive/v3/files/${encodeURIComponent(TEMPLATE_ID)}/copy`, method:'POST', params:{fields:'id', supportsAllDrives:true}, body:{ name } });
-    if (!res.result || !res.result.id) throw new Error('Drive copy returned no file id');
-    banner('Copy ID '+res.result.id);
+
+  async function driveCopy(templateId, name){
+    const res = await gapi.client.drive.files.copy({ fileId: templateId, supportsAllDrives: true, fields: "id", resource: { name } });
     return res.result.id;
   }
-  async function writeValues(id, sheet, values){
-    await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(sheet)}!A1`, method:'PUT', params:{ valueInputOption:'RAW' }, body:{ range:`${sheet}!A1`, majorDimension:'ROWS', values } });
+  async function waitForSheetReady(id){
+    const maxAttempts = 8;
+    for (let i=1;i<=maxAttempts;i++){
+      try {
+        const res = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: id, fields: "spreadsheetId" });
+        if (res && res.result && res.result.spreadsheetId) return;
+      } catch(_){}
+      await new Promise(r=>setTimeout(r, 500*i));
+    }
+    throw new Error("Sheet not ready after copy.");
   }
   async function clearOrAddSheet(id, title){
-    try { await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(title)}!A1:ZZ99999:clear`, method:'POST' }); }
-    catch { await gapi.client.request({ path:`/v4/spreadsheets/${encodeURIComponent(id)}:batchUpdate`, method:'POST', body:{ requests:[{ addSheet: { properties: { title } } }] } }); }
+    try {
+      await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: id, range: `${title}!A1:ZZ99999` });
+    } catch {
+      await gapi.client.sheets.spreadsheets.batchUpdate({
+        spreadsheetId: id,
+        resource: { requests: [{ addSheet: { properties: { title } } }] }
+      });
+    }
   }
-  async function exportToSheetsDebug(){
+  async function writeValues(id, title, values){
+    await gapi.client.sheets.spreadsheets.values.update({
+      spreadsheetId: id,
+      range: `${title}!A1`,
+      valueInputOption: "RAW",
+      resource: { majorDimension: "ROWS", values }
+    });
+  }
+
+  async function exportToSheets(){
     try{
-      step(1,'Start');
-      const newTab = window.open('about:blank','_blank');
-      const snap = scrape(); if (!snap || !snap.headersOut.length || !snap.outRows.length) { banner('No table detected. Run Generate first.','error'); if(newTab) newTab.close(); return; }
-      step(2,`Scraped ${snap.outRows.length} rows / ${snap.headersOut.length} cols`);
-      const eventsGrid = [ snap.headersOut, ...snap.outRows.map(r => snap.headersOut.map(h => r[h] ?? '')) ];
+      const snap = scrapeLargestTable();
+      if (!snap || !snap.headersOut.length || !snap.outRows.length) { alert("No table detected. Run your normal Generate first."); return; }
+
+      const eventsGrid = [ snap.headersOut, ...snap.outRows.map(r => snap.headersOut.map(h => r[h] ?? "")) ];
       const lists = computeLists(snap.headersOut, snap.outRows);
-      const headers = ['room','room in TS','', 'owners','owners in TS','', 'status','', 'unmatched_rooms','unmatched_owners','unmatched_status','appended_headers'];
+      const headers = ["room","room in TS","", "owners","owners in TS","", "status","", "unmatched_rooms","unmatched_owners","unmatched_status","appended_headers"];
       const maxLen = Math.max(lists.rooms.length, lists.owners.length, lists.statuses.length, lists.nonMatched.length, 1);
       const listsGrid = [headers];
-      for (let i=0;i<maxLen;i++){ const A=lists.rooms[i]||'', D=lists.owners[i]||'', G=lists.statuses[i]||'', L=lists.nonMatched[i]||''; const row=i+2;
+      for (let i=0;i<maxLen;i++){
+        const A=lists.rooms[i]||"", D=lists.owners[i]||"", G=lists.statuses[i]||"", L=lists.nonMatched[i]||"";
+        const row=i+2;
         const I=`=IF(A${row}="","",IF(COUNTIF($B:$B,A${row})>0,"",A${row}))`;
         const J=`=IF(D${row}="","",IF(COUNTIF($E:$E,D${row})>0,"",D${row}))`;
         const K=`=IF(G${row}="","",IF(ISNUMBER(MATCH(G${row},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G${row}))`;
-        listsGrid.push([A,'','',D,'','',G,'',I,J,K,L]);
+        listsGrid.push([A,"","",D,"","",G,"",I,J,K,L]);
       }
-      step(3,'Load gapi'); await gapiLoad();
-      step(3.5,'Token (FedCM + drive)'); const tok = await acquireToken(true); gapi.client.setToken({ access_token: tok });
-      const sheetName = (document.getElementById('sheetName')?.value || 'Events').trim() || 'Events';
-      const fileName  = ((document.getElementById('fileName')?.value || 'master_output').trim() || 'master_output').replace(/\s+/g,'_') + ' (Google Sheet)';
-      const id = await copyTemplate(fileName);
-      step(5,'Write sheets');
+
+      await gapiBoot();
+      const tok = await acquireToken(true);
+      gapi.client.setToken({ access_token: tok });
+
+      const sheetName = (document.getElementById("sheetName")?.value || "Events").trim() || "Events";
+      const fileName  = ((document.getElementById("fileName")?.value || "master_output").trim() || "master_output").replace(/\s+/g,"_") + " (Google Sheet)";
+
+      const id = await driveCopy(TEMPLATE_ID, fileName);
+      await waitForSheetReady(id);
+
       await clearOrAddSheet(id, sheetName);
+      await clearOrAddSheet(id, "Lists");
+
       await writeValues(id, sheetName, eventsGrid);
-      await clearOrAddSheet(id, 'Lists');
-      await writeValues(id, 'Lists', listsGrid);
-      step(7,'Open sheet'); if (newTab) newTab.location.href = `https://docs.google.com/spreadsheets/d/${id}/edit`; else window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`,'_blank');
-      step(8,'Done');
+      await writeValues(id, "Lists", listsGrid);
+
+      window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`, "_blank");
     }catch(e){
       console.error(e);
-      banner('Export failed: '+(e && (e.result && e.result.error && e.result.error.message) || e.message || JSON.stringify(e)), 'error');
+      alert("Export failed: " + (e && (e.result?.error?.message || e.message) || String(e)));
     }
   }
-  document.addEventListener('DOMContentLoaded', ()=>{
-    const b = document.getElementById('exportToSheetsBtn');
-    if (b) b.addEventListener('click', exportToSheetsDebug);
+
+  document.addEventListener("DOMContentLoaded", ()=>{
+    const b = document.getElementById("exportToSheetsBtn");
+    if (b) b.addEventListener("click", exportToSheets);
   });
 })();
 </script>
