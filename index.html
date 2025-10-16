@@ -168,22 +168,7 @@
     function log(kind,msg){ const el=$('exportMsg'); if(!el) return; el.className=kind; el.textContent=msg; }
 
     function dedupeHeaders(arr){ const seen=new Map(); return arr.map(h=>{ let base=(h||'').trim()||'Column'; let key=base.toLowerCase(); if(!seen.has(key)){ seen.set(key,1); return base; } const n=seen.get(key); seen.set(key,n+1); return base+'_'+(n+1); }); }
-    function getHeadersFromSheet(ws){ const range=ws['!ref']?XLSX.utils.decode_range(ws['!ref']):null;
-
-
-// === Added: Lossless matrix reader for Sheets export ===
-function readWorksheetMatrix(ws) {
-  // 2D array preserving blanks & long-right columns
-  let rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false });
-  const width = rows.reduce((m, r) => Math.max(m, r.length), 0);
-  rows = rows.map(r => (r.length === width ? r : [...r, ...Array(width - r.length).fill("")]));
-  if (rows.length === 0) rows = [[]];
-  rows[0] = rows[0].map((h, i) => (String(h || "").trim() ? String(h) : `Column_${i + 1}`));
-  return rows;
-}
-
-
- if(!range) return []; const headers=[]; const R=range.s.r; for(let C=range.s.c; C<=range.e.c; ++C){ const cell=ws[XLSX.utils.encode_cell({r:R,c:C})]; let hdr=cell?String(cell.v).trim():''; headers.push(hdr);} while(headers.length && !headers[headers.length-1]) headers.pop(); return headers; }
+    function getHeadersFromSheet(ws){ const range=ws['!ref']?XLSX.utils.decode_range(ws['!ref']):null; if(!range) return []; const headers=[]; const R=range.s.r; for(let C=range.s.c; C<=range.e.c; ++C){ const cell=ws[XLSX.utils.encode_cell({r:R,c:C})]; let hdr=cell?String(cell.v).trim():''; headers.push(hdr);} while(headers.length && !headers[headers.length-1]) headers.pop(); return headers; }
     function norm(str){ let s=String(str||'').toLowerCase(); s=s.replace(/[_-]+/g,' ').trim().replace(/\s+/g,' '); return s; }
     function squish(str){ return norm(str).replace(/\s+/g,''); }
     function guessMatch(masterHdr,chs){ const t=norm(masterHdr), ts=squish(masterHdr); let hit=chs.find(h=>norm(h)===t)||chs.find(h=>squish(h)===ts)||chs.find(h=>squish(h).includes(ts)||ts.includes(squish(h))); return hit||''; }
@@ -531,42 +516,7 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     function pill(t){ const s=document.createElement('span'); s.className='pill'; s.textContent=t; return s; }
     function updateUIAfterLoad(){ const btn=$('togglePreview'); if(btn){ btn.disabled=false; btn.onclick=()=>{ const p=$('preview'); const isOpen=!!(p && p.style.display!=='none'); if(p) p.style.display=isOpen?'none':'block'; btn.textContent=isOpen?'Show Preview':'Hide Preview'; }; const p0=$('preview'); btn.textContent= (p0&&p0.style.display!=='none')?'Hide Preview':'Show Preview'; } renderPreview(); buildMappingUI(); updateRoomsPreview(); initStatusMappingSection(); initRoomMappingSection(); initOwnerMappingSection(); const meta=$('customerMeta'); if(meta){ meta.style.display='flex'; meta.innerHTML=''; } }
 
-    function handleFile(f){
-    if(!window.XLSX){ log('danger','Excel parser not loaded.'); return; }
-    const reader=new FileReader();
-    reader.onload=()=>{
-      try{
-        const data=new Uint8Array(reader.result);
-        const wb=XLSX.read(data,{type:'array'});
-        const ws=wb.Sheets[wb.SheetNames[0]];
-
-        // Build a full rectangular matrix (preserve blanks & far-right columns)
-        const matrix = readWorksheetMatrix(ws);
-        customer.matrix = matrix;
-
-        // Maintain object-view for existing UI previews/mapping
-        const headers = matrix[0];
-        const body = matrix.slice(1);
-        customer.headers = headers.map(h => String(h || '').trim());
-        customer.rows = body.map(r => {
-          const o = {}; for (let i=0; i<headers.length; i++) o[headers[i]] = (r[i] ?? "");
-          return o;
-        });
-
-        customer.sourceKey=`${f.name}|${wb.SheetNames[0]}|${customer.headers.join(',')}`.slice(0,500);
-        const meta=$('customerMeta');
-        meta.style.display='flex';
-        meta.innerHTML='';
-        meta.appendChild(pill(`File: ${f.name}`));
-        meta.appendChild(pill(`Sheet: ${wb.SheetNames[0]}`));
-        meta.appendChild(pill(`${customer.headers.length} columns`));
-        meta.appendChild(pill(`${customer.rows.length} rows`));
-        updateUIAfterLoad();
-      }catch(err){ log('danger','Failed to read file: '+(err&&err.message?err.message:String(err))); }
-    };
-    reader.onerror=()=>log('danger','File read error');
-    reader.readAsArrayBuffer(f);
-    } const reader=new FileReader(); reader.onload=()=>{ try{ const data=new Uint8Array(reader.result); const wb=XLSX.read(data,{type:'array'}); const ws=wb.Sheets[wb.SheetNames[0]]; const rows=XLSX.utils.sheet_to_json(ws,{defval:'',raw:false}); let headers=getHeadersFromSheet(ws); headers=dedupeHeaders(headers); customer.headers=(headers||[]).map(h=>String(h||'').trim()); customer.rows=rows||[]; customer.sourceKey=`${f.name}|${wb.SheetNames[0]}|${customer.headers.join(',')}`.slice(0,500); const meta=$('customerMeta'); meta.style.display='flex'; meta.innerHTML=''; meta.appendChild(pill(`File: ${f.name}`)); meta.appendChild(pill(`Sheet: ${wb.SheetNames[0]}`)); meta.appendChild(pill(`${customer.headers.length} columns`)); meta.appendChild(pill(`${customer.rows.length} rows`)); updateUIAfterLoad(); }catch(err){ log('danger','Failed to read file: '+(err&&err.message?err.message:String(err))); } }; reader.onerror=()=>log('danger','File read error'); reader.readAsArrayBuffer(f); }
+    function handleFile(f){ if(!window.XLSX){ log('danger','Excel parser not loaded.'); return; } const reader=new FileReader(); reader.onload=()=>{ try{ const data=new Uint8Array(reader.result); const wb=XLSX.read(data,{type:'array'}); const ws=wb.Sheets[wb.SheetNames[0]]; const rows=XLSX.utils.sheet_to_json(ws,{defval:'',raw:false}); let headers=getHeadersFromSheet(ws); headers=dedupeHeaders(headers); customer.headers=(headers||[]).map(h=>String(h||'').trim()); customer.rows=rows||[]; customer.sourceKey=`${f.name}|${wb.SheetNames[0]}|${customer.headers.join(',')}`.slice(0,500); const meta=$('customerMeta'); meta.style.display='flex'; meta.innerHTML=''; meta.appendChild(pill(`File: ${f.name}`)); meta.appendChild(pill(`Sheet: ${wb.SheetNames[0]}`)); meta.appendChild(pill(`${customer.headers.length} columns`)); meta.appendChild(pill(`${customer.rows.length} rows`)); updateUIAfterLoad(); }catch(err){ log('danger','Failed to read file: '+(err&&err.message?err.message:String(err))); } }; reader.onerror=()=>log('danger','File read error'); reader.readAsArrayBuffer(f); }
 
     function wireDnD(){
       const drop=$('drop'); const input=$('customerFile'); const overlay=$('overlayPicker');
@@ -673,26 +623,12 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 
   function norm(s){ return String(s||'').toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim(); }
 
-  
-function getDataMatrix(){
-  // 1) Prefer the full rectangular matrix built at load time
-  if (typeof customer !== 'undefined' && customer && Array.isArray(customer.matrix) && customer.matrix.length){
-    return { matrix: customer.matrix, source: 'matrix' };
-  }
-  // 2) Fallback: scrape DOM table into a rectangular matrix
-  const t=document.querySelector('table'); if(!t) return null;
-  const thead=t.querySelector('thead'), tbody=t.querySelector('tbody');
-  let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll('th,td')).map(x=>x.textContent.trim());
-  const rowEls = tbody ? Array.from(tbody.querySelectorAll('tr')) : Array.from(t.querySelectorAll('tr'));
-  const bodyRows = rowEls.map(tr=>Array.from(tr.querySelectorAll('td,th')).map(td=>td.textContent.trim()));
-  if (!headers.length && bodyRows.length){ headers = bodyRows.shift(); }
-  const width = Math.max(headers.length, ...bodyRows.map(r=>r.length));
-  const pad = (r)=> (r.length===width ? r : [...r, ...Array(width-r.length).fill("")]);
-  const head = pad(headers.map((h,i)=> String(h||'') || `Column_${i+1}`));
-  const rect = [head, ...bodyRows.map(pad)];
-  return { matrix: rect, source:'dom' };
-}
-;
+  function getData(){
+    // 1) Prefer the parsed Excel data (customer.headers / customer.rows)
+    try {
+      if (typeof customer!=='undefined' && Array.isArray(customer.rows) && customer.rows.length){
+        if (Array.isArray(customer.headers) && customer.headers.length){
+          return { headersOut: customer.headers.slice(), outRows: customer.rows.slice(), source: 'customer' };
         }
       }
     } catch(_){}
@@ -732,52 +668,9 @@ function getDataMatrix(){
   }
 
   async function exportToSheets(){
-  try{
-    const snap = getDataMatrix();
-    if(!snap || !snap.matrix || snap.matrix.length < 2){
-      alert('No table detected (or no rows).');
-      return;
-    }
-    const eventsGrid = snap.matrix; // [[H...], [r1...], ...]
-    const headersOut = eventsGrid[0];
-    const outRows = eventsGrid.slice(1).map(r => {
-      const o={}; for(let i=0;i<headersOut.length;i++) o[headersOut[i]] = r[i] ?? "";
-      return o;
-    });
-
-    const lists = computeLists(headersOut, outRows);
-    const sheetName=(document.getElementById('sheetName')?.value||'Events').trim()||'Events';
-    const fileName=((document.getElementById('fileName')?.value||'master_output').trim()||'master_output').replace(/\s+/g,'_')+' (Google Sheet)';
-
-    await gapiBoot(); const tok=await getToken(); gapi.client.setToken({access_token:tok});
-    const id=await driveCopy(TEMPLATE_ID, fileName); await waitReady(id);
-
-    await ensureSheet(id, sheetName);
-    await ensureSheet(id, 'Lists');
-
-    // Write the full rectangle from A1
-    await writeRAW(id, sheetName, eventsGrid);
-
-    // Build & write Lists (unchanged)
-    const headers=["room","room in TS","", "owners","owners in TS","", "status","", "unmatched_rooms","unmatched_owners","unmatched_status","appended_headers"];
-    const len=Math.max(lists.rooms.length, lists.owners.length, lists.statuses.length, lists.nonMatched.length, 1);
-    const listGrid=[headers];
-    for(let i=0;i<len;i++){
-      const A=lists.rooms[i]||"", D=lists.owners[i]||"", G=lists.statuses[i]||"", L=lists.nonMatched[i]||"";
-      const r=i+2;
-      const I=`=IF(A${r}="","",IF(COUNTIF($B:$B,A${r})>0,"",A${r}))`;
-      const J=`=IF(D${r}="","",IF(COUNTIF($E:$E,D${r})>0,"",D${r}))`;
-      const K=`=IF(G${r}="","",IF(ISNUMBER(MATCH(G${r},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G${r}))`;
-      listGrid.push([A,"","",D,"","",G,"",I,J,K,L]);
-    }
-    await writeUSER(id, 'Lists', listGrid);
-
-    window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`,'_blank');
-  }catch(e){
-    console.error(e);
-    alert('Export failed: '+(e?.result?.error?.message||e.message||String(e)));
-  }
-}
+    try{
+      const snap=getData();
+      if(!snap || !snap.headersOut.length || !snap.outRows.length){ alert('No table detected (or no rows). Run Generate first.'); return; }
       const eventsGrid=[ snap.headersOut, ...snap.outRows.map(r => snap.headersOut.map(h => r[h] ?? "")) ];
       const lists=computeLists(snap.headersOut, snap.outRows);
       const headers=["room","room in TS","", "owners","owners in TS","", "status","", "unmatched_rooms","unmatched_owners","unmatched_status","appended_headers"];
@@ -797,6 +690,234 @@ function getDataMatrix(){
   }
 })();
 </script>
+
+
+<!-- ==== 3seats: Direct-to-Google-Sheets exporter with Excel fallback (merged, non-destructive) ==== -->
+<script async defer src="https://apis.google.com/js/api.js"></script>
+<script async defer src="https://accounts.google.com/gsi/client"></script>
+<script>
+(function(){
+  const TEMPLATE_ID = "1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
+  const CLIENT_ID   = "7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com";
+
+  function status(msg){ try{ console.log("[3seats]", msg); }catch(_){} }
+
+  async function ensureGapi(){
+    status("Loading Google APIs…");
+    await new Promise((resolve,reject)=>{ gapi.load("client", async ()=>{ try{ await gapi.client.init({}); resolve(); }catch(e){ reject(e); } }); });
+    await gapi.client.load("https://www.googleapis.com/discovery/v1/apis/drive/v3/rest");
+    await gapi.client.load("https://sheets.googleapis.com/$discovery/rest?version=v4");
+  }
+  async function ensureToken(){
+    return await new Promise((resolve,reject)=>{
+      const tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets",
+        use_fedcm_for_prompt: true,
+        callback: ()=>{}
+      });
+      tokenClient.callback = (r)=> r && r.access_token ? resolve(r.access_token) : reject(new Error(r?.error||"No token"));
+      tokenClient.requestAccessToken({prompt:"consent"});
+    });
+  }
+  async function waitReady(id){
+    for (let i=1;i<=10;i++){
+      try { const r = await gapi.client.sheets.spreadsheets.get({ spreadsheetId:id, fields:"spreadsheetId" }); if (r?.result?.spreadsheetId) return; } catch(_){}
+      await new Promise(r=>setTimeout(r, 200*i));
+    }
+    throw new Error("Google Sheet not ready.");
+  }
+  async function ensureSheet(spreadsheetId, title){
+    const r = await gapi.client.sheets.spreadsheets.get({ spreadsheetId, fields: "sheets(properties(sheetId,title))" });
+    const found = (r.result.sheets||[]).find(s => s.properties.title === title);
+    if (found) return found.properties;
+    const add = await gapi.client.sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      resource: { requests: [{ addSheet: { properties: { title } } }] }
+    });
+    return add.result?.replies?.[0]?.addSheet?.properties;
+  }
+  async function clearRange(spreadsheetId, sheetTitle){
+    await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId, range: `${sheetTitle}!A1:ZZ100000` });
+  }
+  async function putValues(spreadsheetId, sheetTitle, grid){
+    if (!grid || !grid.length) return;
+    await gapi.client.sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${sheetTitle}!A1`,
+      valueInputOption: "RAW",
+      resource: { values: grid, majorDimension: "ROWS" }
+    });
+  }
+  function pickExcel(){
+    return new Promise((resolve)=>{
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      inp.style.position = 'fixed'; inp.style.left = '-9999px';
+      document.body.appendChild(inp);
+      inp.addEventListener('change', ()=> resolve(inp.files && inp.files[0] ? inp.files[0] : null));
+      inp.click();
+    });
+  }
+  async function uploadAndConvertXlsx(blob, name){
+    const metadata = new Blob([JSON.stringify({ name: name + " (Converted)", mimeType: "application/vnd.google-apps.spreadsheet" })], { type: "application/json" });
+    const boundary = "-------314159265358979323846";
+    const delimiter = "\r\n--" + boundary + "\r\n";
+    const closeDelim = "\r\n--" + boundary + "--";
+    const body = new Blob([
+      delimiter, 'Content-Type: application/json; charset=UTF-8\r\n\r\n', metadata,
+      delimiter, 'Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n', blob, closeDelim
+    ], { type: "multipart/related; boundary=" + boundary });
+
+    const res = await gapi.client.request({
+      path: "/upload/drive/v3/files?uploadType=multipart&fields=id",
+      method: "POST",
+      body,
+      headers: { "Content-Type": "multipart/related; boundary=" + boundary }
+    });
+    return res.result.id;
+  }
+
+  // Build grids from in-memory data structures your tool already uses
+  function computeDirectGrids(){
+    const c = window.customer;
+    if (!c || !Array.isArray(c.rows) || !c.rows.length) return null;
+
+    // Try to honor your mapping UI if present
+    const mappingRows = Array.from(document.querySelectorAll('#mappingRows .mapping-row'));
+    let headersOut;
+    if (mappingRows.length){
+      const labelToKey = (el)=> (el?.textContent || "").replace("required","").trim();
+      headersOut = mappingRows.map(r => labelToKey(r.children?.[0])).filter(Boolean);
+
+      // extras: customer headers not mapped (if UI has checkbox)
+      const used = new Set();
+      mappingRows.forEach(row => {
+        const sel = row.children?.[1];
+        if (sel && sel.value) used.add(sel.value);
+      });
+      const append = document.getElementById('appendExtras')?.checked;
+      const extras = append ? (c.headers||[]).filter(h => h && !used.has(h)) : [];
+      headersOut = [...headersOut, ...extras];
+    } else {
+      headersOut = Array.isArray(c.headers) ? c.headers.slice() : Object.keys(c.rows[0]||{});
+    }
+
+    const eventsGrid = [ headersOut ];
+    for (const row of c.rows){
+      eventsGrid.push(headersOut.map(h => (row[h] ?? "")));
+    }
+
+    const unmatchedRooms   = Array.isArray(window.unmatched_rooms)   ? window.unmatched_rooms   : [];
+    const unmatchedOwners  = Array.isArray(window.unmatched_owners)  ? window.unmatched_owners  : [];
+    const unmatchedStatus  = Array.isArray(window.unmatched_status)  ? window.unmatched_status  : [];
+    const appendedHeaders  = Array.isArray(window.appended_headers)  ? window.appended_headers  : [];
+
+    const maxListLen = Math.max(unmatchedRooms.length, unmatchedOwners.length, unmatchedStatus.length, appendedHeaders.length);
+    const listsGrid = [];
+    listsGrid.push(["unmatched_rooms", "unmatched_owners", "unmatched_status", "appended_headers"]);
+    for (let i=0; i<maxListLen; i++){
+      listsGrid.push([
+        unmatchedRooms[i]  ?? "",
+        unmatchedOwners[i] ?? "",
+        unmatchedStatus[i] ?? "",
+        appendedHeaders[i] ?? ""
+      ]);
+    }
+    return { eventsGrid, listsGrid };
+  }
+
+  async function exportToGoogle(){
+    try{
+      status("Export start");
+      await ensureGapi();
+      const token = await ensureToken();
+      gapi.client.setToken({access_token: token});
+
+      const baseName = ((document.getElementById("fileName")?.value || "master_output").trim()||"master_output").replace(/\s+/g,"_");
+      const gsName = baseName + " (Google Sheet)";
+      const copyRes = await gapi.client.drive.files.copy({
+        fileId: TEMPLATE_ID, supportsAllDrives: true, fields: "id", resource: { name: gsName }
+      });
+      const spreadsheetId = copyRes.result.id;
+      await waitReady(spreadsheetId);
+
+      // Preferred: write from in-memory data (gets all columns beyond Z)
+      const grids = computeDirectGrids();
+      if (grids){
+        status("Writing in-memory data to Sheets…");
+        await ensureSheet(spreadsheetId, "Events");
+        await ensureSheet(spreadsheetId, "Lists");
+        await clearRange(spreadsheetId, "Events");
+        await clearRange(spreadsheetId, "Lists");
+        await putValues(spreadsheetId, "Events", grids.eventsGrid);
+        await putValues(spreadsheetId, "Lists",  grids.listsGrid);
+        window.open(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`, "_blank");
+        return;
+      }
+
+      // Fallback: ask for the Excel you just downloaded; convert & copy all tabs
+      status("No in-memory data. Pick your downloaded Excel…");
+      const picked = await pickExcel();
+      if (!picked){ alert("Export canceled (no Excel selected)."); return; }
+
+      const convertedId = await uploadAndConvertXlsx(picked, baseName);
+
+      // Copy all tabs from converted file into template copy
+      const getSheets = async (id) => {
+        const res = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: id, fields:"sheets(properties(sheetId,title,index))" });
+        return (res.result.sheets||[]).map(s=>s.properties);
+      };
+      const srcSheets = await getSheets(convertedId);
+
+      for (const s of srcSheets){
+        await gapi.client.sheets.spreadsheets.sheets.copyTo({
+          spreadsheetId: convertedId, sheetId: s.sheetId,
+          resource: { destinationSpreadsheetId: spreadsheetId }
+        });
+      }
+
+      // Remove placeholders created by template (keep only inserted ones)
+      const dstSheets = await getSheets(spreadsheetId);
+      const insertedTitles = new Set(srcSheets.map(s=>s.title));
+      const toDelete = dstSheets.filter(p => !insertedTitles.has(p.title));
+      if (toDelete.length){
+        await gapi.client.sheets.spreadsheets.batchUpdate({
+          spreadsheetId,
+          resource: { requests: toDelete.map(p => ({ deleteSheet: { sheetId: p.sheetId } })) }
+        });
+      }
+
+      window.open(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`, "_blank");
+      status("Export done via Excel fallback");
+    }catch(e){
+      console.error(e);
+      alert("Export failed: " + (e?.result?.error?.message || e.message || String(e)));
+    }
+  }
+
+  // Expose under the existing name so your current button keeps working
+  window.exportToSheets = exportToGoogle;
+
+  // Backup wiring: bind to any button with matching label
+  function wireByText(){
+    const nodes = Array.from(document.querySelectorAll('button, a, input[type="button"], input[type="submit"]'));
+    const btn = nodes.find(el => /export\s+to\s+google\s+sheet/i.test((el.textContent || el.value || '').trim()));
+    if (btn && !btn.dataset._wired){
+      btn.dataset._wired = "1";
+      btn.addEventListener('click', function(e){ e.preventDefault(); exportToGoogle(); });
+      status("Wired Export button by text");
+    }
+  }
+  document.addEventListener('DOMContentLoaded', function(){
+    wireByText();
+    setTimeout(wireByText, 500);
+    setTimeout(wireByText, 1500);
+  });
+})();
+</script>
+<!-- ==== /3seats exporter merge ==== -->
 
 </body>
 </html>
