@@ -6,8 +6,6 @@
   <title>Event Data Import Tool</title>
   <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script async defer src="https://apis.google.com/js/api.js"></script>
-  <script async defer src="https://accounts.google.com/gsi/client"></script>
   <style>
     :root{ --bg:#0b1020; --panel:#141a2f; --muted:#b7c4ff; --text:#f5f8ff; --warn:#ffb020; --err:#ff6b6b; --ok:#32d583; }
     *{box-sizing:border-box}
@@ -50,7 +48,7 @@
   <header>
     <h1>Event Data Import Tool</h1>
     <div class="hint" style="margin-top:6px">Upload/Preview, Field Mapping, Rooms, optional Status, Room & Owner mapping, and Export.</div>
-    <div class="hint" style="margin-top:4px">Last updated: October 16, 2025 - Fixed Google Sheets Export</div>
+    <div class="hint" style="margin-top:4px">Last updated: October 2, 2025</div>
   </header>
 
   <main class="grid">
@@ -155,8 +153,172 @@
   <div id="toast" class="toast"></div>
 
   <script>
-// [CONTINUED IN PART 2 - File is too large for one message]
-// The download will include the complete file with all JavaScript
-  </script>
-</body>
-</html>
+    // ===== Constants & helpers =====
+    const NL='\n';
+    const MASTER_HEADERS=['name','date','start_time','end_time','status','contact_full_name','contact_first_name','contact_last_name','account','room','location','owner','event_style','delivery_instructions','offsite_address_street','offsite_address_street2','offsite_address_city','offsite_address_state','offsite_address_zip','offsite_address_country','offsite_address_full','created_at','setup_time','teardown_time','guest_count','guaranteed_guest_count','actual_amount','grand_total','deposit_amount','description','food_and_beverage_min','payment_type','event_type','lead_source','rental_fee','amount_due','price_per_person','lost_reason'];
+    const FALLBACK_DEFAULT_COLUMNS=new Set(['name','date','start_time','end_time','status','contact_full_name','contact_first_name','contact_last_name','account','room','location','owner','event_style']);
+    const PREFILLED_DEFAULTS={name:'Not Specified',date:'01/01/2020',start_time:'11:59 am',end_time:'11:59 pm',status:'tentative',contact_full_name:'Not Specified',contact_first_name:'Not',contact_last_name:'Specified',account:'TS Import',room:'TS Import',location:'Location',owner:'Owner',event_style:'On Premise'};
+    const RED_HEADERS=new Set(['name','date','start_time','end_time','status','contact_full_name','contact_first_name','contact_last_name','account','room','location','owner','event_style']);
+    const YELLOW_HEADERS=new Set(['delivery_instructions','offsite_address_street','offsite_address_street2','offsite_address_city','offsite_address_state','offsite_address_zip','offsite_address_country','offsite_address_full']);
+    const CANON_STATUSES=['Prospect','Tentative','Definite','Closed','Lost'];
+
+    let master={headers:MASTER_HEADERS,sheetName:'Events'};
+    let customer={headers:[],rows:[],sourceKey:''};
+    const $=id=>document.getElementById(id);
+    function toast(text,kind='info'){ const t=$('toast'); if(!t) return; t.textContent=text; t.style.display='block'; t.style.borderColor=kind==='error'?'#ff6b6b':(kind==='warn'?'#ffb020':'#2b3761'); setTimeout(()=>t.style.display='none',2200); }
+    function log(kind,msg){ const el=$('exportMsg'); if(!el) return; el.className=kind; el.textContent=msg; }
+
+    function dedupeHeaders(arr){ const seen=new Map(); return arr.map(h=>{ let base=(h||'').trim()||'Column'; let key=base.toLowerCase(); if(!seen.has(key)){ seen.set(key,1); return base; } const n=seen.get(key); seen.set(key,n+1); return base+'_'+(n+1); }); }
+    function getHeadersFromSheet(ws){ const range=ws['!ref']?XLSX.utils.decode_range(ws['!ref']):null; if(!range) return []; const headers=[]; const R=range.s.r; for(let C=range.s.c; C<=range.e.c; ++C){ const cell=ws[XLSX.utils.encode_cell({r:R,c:C})]; let hdr=cell?String(cell.v).trim():''; headers.push(hdr);} while(headers.length && !headers[headers.length-1]) headers.pop(); return headers; }
+    function norm(str){ let s=String(str||'').toLowerCase(); s=s.replace(/[_-]+/g,' ').trim().replace(/\s+/g,' '); return s; }
+    function squish(str){ return norm(str).replace(/\s+/g,''); }
+    function guessMatch(masterHdr,chs){ const t=norm(masterHdr), ts=squish(masterHdr); let hit=chs.find(h=>norm(h)===t)||chs.find(h=>squish(h)===ts)||chs.find(h=>squish(h).includes(ts)||ts.includes(squish(h))); return hit||''; }
+
+    function renderPreview(){ const table=$('previewTable'); if(!table) return; table.innerHTML=''; if(!customer.rows.length){ $('previewCount').textContent='0'; return;} const sample=customer.rows.slice(0,10); $('previewCount').textContent=String(customer.rows.length); const thead=document.createElement('thead'); const trh=document.createElement('tr'); customer.headers.forEach(h=>{ const th=document.createElement('th'); th.textContent=h; trh.appendChild(th); }); thead.appendChild(trh); table.appendChild(thead); const tbody=document.createElement('tbody'); for(const row of sample){ const tr=document.createElement('tr'); for(const h of customer.headers){ const td=document.createElement('td'); td.textContent=(row[h]??'').toString(); tr.appendChild(td);} tbody.appendChild(tr);} table.appendChild(tbody); }
+
+    function getMappingSelects(){ return Array.from(document.querySelectorAll('#mappingRows .mapping-row select[data-master], #mappingRows .mapping-row select:nth-child(2)')) }
+    function cacheSelectOptions(sel){ if(!sel) return; if(sel._allOptions) return; sel._allOptions = Array.from(sel.options).map(o=>({value:o.value, text:o.text})); }
+    function getChosenValues(){ const chosen=new Set(); getMappingSelects().forEach(sel=>{ if(sel.value) chosen.add(sel.value); }); return chosen; }
+    function rebuildOptionsForSelect(sel, chosen){ if(!sel || !sel._allOptions) return; const keep=sel.value; const optionsToShow=sel._allOptions.filter(o=>!o.value || o.value===keep || !chosen.has(o.value)); const currentSig=Array.from(sel.options).map(o=>o.value+'\u0001'+o.text).join('\u0002'); const nextSig=optionsToShow.map(o=>o.value+'\u0001'+o.text).join('\u0002'); if(currentSig===nextSig) return; sel.innerHTML=''; optionsToShow.forEach(o=> sel.add(new Option(o.text,o.value))); sel.value=keep||''; }
+    function syncSourceOptions(){ const chosen=getChosenValues(); getMappingSelects().forEach(sel=> rebuildOptionsForSelect(sel, chosen)); }
+
+    function buildMappingUI(){ if(!customer.headers.length){ $('mappingArea').style.display='none'; $('mappingNotice').style.display='block'; $('exportBtn').disabled=true; return; } $('mappingNotice').style.display='none'; $('mappingArea').style.display='block'; const rows=$('mappingRows'); rows.innerHTML='';
+      const sortedHeaders=[...customer.headers].sort((a,b)=>a.localeCompare(b));
+      master.headers.forEach(hdr=>{
+        const row=document.createElement('div'); row.className='mapping-row';
+        const label=document.createElement('div'); label.textContent=hdr; label.className='pill col-name';
+        const isFallback=FALLBACK_DEFAULT_COLUMNS.has(hdr);
+        if(isFallback){ const b=document.createElement('span'); b.className='pill required'; b.textContent='required'; b.title='Default used only if blank'; label.appendChild(b);} 
+        if (YELLOW_HEADERS.has(hdr)){
+          const y=document.createElement('span');
+          y.className='pill offsite';
+          y.textContent='Off-Site';
+          y.title='Fields used for off-site events';
+          label.appendChild(y);
+        }
+        const sel=document.createElement('select'); sel.add(new Option('— (leave blank)',''));
+        sortedHeaders.forEach(ch=>{ const o=new Option(ch,ch); sel.add(o); });
+        sel.dataset.master=hdr; const best=guessMatch(hdr,customer.headers); if(best) sel.value=best; cacheSelectOptions(sel); sel.addEventListener('change', ()=>{ syncSourceOptions(); });
+        const transform=document.createElement('select');
+        const options=[
+          {val:'none', label:'none — leave as is'},
+          {val:'trim', label:'trim — remove spaces both ends'},
+          {val:'ltrim', label:'ltrim — remove leading spaces'},
+          {val:'rtrim', label:'rtrim — remove trailing spaces'},
+          {val:'upper', label:'upper — HELLO WORLD'},
+          {val:'lower', label:'lower — hello world'},
+          {val:'title', label:'title — Hello World'},
+          {val:'digits-only', label:'digits-only — 12345'},
+          {val:'date:MM/DD/YYYY', label:'date → 12/31/2025 (MM/DD/YYYY)'},
+          {val:'date:YYYY-MM-DD', label:'date → 2025-12-31 (YYYY-MM-DD)'},
+          {val:'date:DD/MM/YYYY', label:'date → 31/12/2025 (DD/MM/YYYY)'}
+        ];
+        options.forEach(o=>transform.add(new Option(o.label,o.val)));
+        transform.value = (hdr === 'date') ? 'date:MM/DD/YYYY' : 'none';
+        const constant=document.createElement('input'); constant.type='text'; constant.placeholder=isFallback?'Optional default (used only if blank)':'Disabled';
+        if(isFallback && PREFILLED_DEFAULTS[hdr]) constant.value=PREFILLED_DEFAULTS[hdr];
+        if(!isFallback){
+          constant.disabled=true; constant.classList.add('disabled-cell');
+        }
+        if(hdr==='room'){ sel.addEventListener('change', updateRoomsPreview); transform.addEventListener('change', updateRoomsPreview); constant.addEventListener('input', updateRoomsPreview);} 
+        row.appendChild(label); row.appendChild(sel); row.appendChild(transform); row.appendChild(constant); rows.appendChild(row); 
+      });
+      $('exportBtn').disabled=false; updateRoomsPreview(); autoLoadMapping(); syncSourceOptions();
+    }
+
+    function titleCase(s){ return s.replace(/\w\S*/g,t=>t[0].toUpperCase()+t.slice(1).toLowerCase()); }
+    function applyTransform(v,k){ if(v==null) v=''; let s=String(v); switch(k){ case 'trim': return s.trim(); case 'ltrim': return s.replace(/^\s+/, ''); case 'rtrim': return s.replace(/\s+$/, ''); case 'upper': return s.toUpperCase(); case 'lower': return s.toLowerCase(); case 'title': return titleCase(s); case 'digits-only': return s.replace(/\D+/g,''); default: if(k&&k.startsWith('date:')){ const fmt=k.split(':')[1]; const d=parseDateSmart(s); if(d) return formatDate(d,fmt);} return s; } }
+    function formatDate(d,fmt){ const yyyy=d.getFullYear(); const mm=d.getMonth()+1; const dd=d.getDate(); const MM=String(mm).padStart(2,'0'); const DD=String(dd).padStart(2,'0'); return fmt.replace('YYYY',String(yyyy)).replace('MM',MM).replace('DD',DD); }
+    function parseDateSmart(s){ if(!s) return null; const t=String(s).trim(); let d=new Date(t); if(!isNaN(d)) return d; const m=t.match(/^([0-3]?\d)[\/\-]([0-3]?\d)[\/\-](\d{2,4})$/); if(m){ let a=+m[1], b=+m[2], y=+m[3]; if(y<100) y+=2000; let mm,dd; if(a>12){ dd=a; mm=b;} else if(b>12){ mm=a; dd=b;} else { mm=a; dd=b;} d=new Date(y,mm-1,dd); if(!isNaN(d)) return d;} return null; }
+
+    // ===== Rooms helpers =====
+    function getRoomSeps(){ const el=$('roomSeps'); const v=(el&&typeof el.value==='string')?el.value:''; return v||',/;|:'; }
+    function splitRooms(cell,seps){ if(cell==null) return []; let s=String(cell).trim(); if(!s) return []; const chars=(seps||'').split(''); if(chars.length===0) return [s]; for(const ch of chars){ s=splitAndJoin(s,ch,NL);} return s.split(NL).map(x=>x.trim()).filter(Boolean); }
+    function splitAndJoin(s,needle,repl){ return s.split(needle).join(repl); }
+    function normalizeRoom(r){ return String(r).trim().replace(/\s+/g,' '); }
+    function uniqueCaseInsensitive(list){ const seen=new Map(); list.forEach(item=>{ const key=String(item).toLowerCase(); if(!seen.has(key)) seen.set(key,item); }); return Array.from(seen.values()); }
+    function computeRoomsFromCurrentMapping(){ const rows=Array.from(document.querySelectorAll('#mappingRows .mapping-row')); const roomRow=rows.find(r=>{ const lbl=r.children[0]; const key=(lbl.firstChild&&lbl.firstChild.nodeType===Node.TEXT_NODE)?lbl.firstChild.nodeValue:lbl.textContent.replace('required','').trim(); return key==='room';}); if(!roomRow) return []; const sel=roomRow.children[1]; const tr=roomRow.children[2]; const constant=roomRow.children[3]; const seps=getRoomSeps(); const values=[]; for(const src of (customer.rows||[])){ let v=''; if(sel&&sel.value){ v=src[sel.value]; } if(FALLBACK_DEFAULT_COLUMNS.has('room') && (!v||v==='') && constant && constant.value){ v=constant.value; } v=applyTransform(v, tr?tr.value:'none'); values.push(...splitRooms(v,seps)); } const normed=values.map(normalizeRoom).filter(Boolean); return uniqueCaseInsensitive(normed).sort((a,b)=>a.localeCompare(b)); }
+    function computeStatusesFromCurrentMapping(){ const rows=Array.from(document.querySelectorAll('#mappingRows .mapping-row')); const statusRow=rows.find(r=>{ const lbl=r.children[0]; const key=(lbl.firstChild&&lbl.firstChild.nodeType===Node.TEXT_NODE)?lbl.firstChild.nodeValue:lbl.textContent.replace('required','').trim(); return key==='status';}); if(!statusRow) return []; const sel=statusRow.children[1]; const tr=statusRow.children[2]; const constant=statusRow.children[3]; const vals=[]; for(const src of (customer.rows||[])){ let v=''; if(sel&&sel.value){ v=src[sel.value]; } if(FALLBACK_DEFAULT_COLUMNS.has('status') && (!v||v==='') && constant && constant.value){ v=constant.value; } v=applyTransform(v, tr?tr.value:'none'); if(v!=null) vals.push(String(v).trim()); } return uniqueCaseInsensitive(vals).filter(Boolean).sort((a,b)=>a.localeCompare(b)); }
+    function computeOwnersFromCurrentMapping(){ const rows=Array.from(document.querySelectorAll('#mappingRows .mapping-row')); const ownerRow=rows.find(r=>{ const lbl=r.children[0]; const key=(lbl.firstChild&&lbl.firstChild.nodeType===Node.TEXT_NODE)?lbl.firstChild.nodeValue:lbl.textContent.replace('required','').trim(); return key==='owner';}); if(!ownerRow) return []; const sel=ownerRow.children[1]; const tr=ownerRow.children[2]; const constant=ownerRow.children[3]; const vals=[]; for(const src of (customer.rows||[])){ let v=''; if(sel&&sel.value){ v=src[sel.value]; } if(FALLBACK_DEFAULT_COLUMNS.has('owner') && (!v||v==='') && constant && constant.value){ v=constant.value; } v=applyTransform(v, tr?tr.value:'none'); if(v!=null) vals.push(String(v).trim()); } return uniqueCaseInsensitive(vals).filter(Boolean).sort((a,b)=>a.localeCompare(b)); }
+
+    // Live Rooms preview (list + count)
+    function updateRoomsPreview(){
+      const list=$('roomsList'); const count=$('roomsCount');
+      if(!list||!count) return;
+      try{
+        const rooms=computeRoomsFromCurrentMapping();
+        list.innerHTML='';
+        rooms.forEach(r=>{ const chip=document.createElement('span'); chip.className='room-chip'; chip.textContent=r; list.appendChild(chip); });
+        count.textContent=String(rooms.length);
+      }catch(err){ console.error('updateRoomsPreview error',err); }
+    }
+
+    // ===== Status mapping =====
+    let STATUS_MAP_ENABLED=false; let STATUS_MAP={};
+    function STATUS_DEFAULT_KEY(){ return 'pgmi:statusmap:default:' + (customer.sourceKey||'unknown'); }
+    function statusEnabledKey(){ return 'pgmi:statusmap:enabled:'+(customer.sourceKey||'unknown'); }
+    function setStatusMappingEnabled(v){ STATUS_MAP_ENABLED=!!v; const area=$('statusMapArea'); if(area) area.style.display=v?'block':'none'; const btn=$('toggleStatusMap'); if(btn) btn.textContent=v?'Disable status mapping':'Enable status mapping'; if(v) buildStatusMappingUI(); try{ localStorage.setItem(statusEnabledKey(), JSON.stringify(STATUS_MAP_ENABLED)); }catch(_){ } }
+    function initStatusMappingSection(){ STATUS_MAP_ENABLED=false; const area=$('statusMapArea'); if(area) area.style.display='none'; const btn=$('toggleStatusMap'); if(btn){ btn.textContent='Enable status mapping'; btn.onclick=()=> setStatusMappingEnabled(!STATUS_MAP_ENABLED); } }
+    function getStatusMapKey(){ return 'pgmi:statusmap:'+(customer.sourceKey||'unknown'); }
+    function guessCanonicalStatus(s){ const t=String(s||'').toLowerCase(); if(/prospect|lead|inquiry|enquir/.test(t)) return 'Prospect'; if(/tentative|pending|hold|penc?il/.test(t)) return 'Tentative'; if(/definite|confirmed|booked|contract|firm|guaranteed/.test(t)) return 'Definite'; if(/closed(?!.*lost)|won|completed|fulfilled/.test(t)) return 'Closed'; if(/lost|cancel|cancell|closed.*lost|abandoned|declined/.test(t)) return 'Lost'; return 'Tentative'; }
+    function buildStatusMappingUI(){ const wrap=$('statusMapRows'); if(!wrap) return; wrap.innerHTML=''; const defSel=$('statusDefault'); if(defSel){ try{ const saved=localStorage.getItem(STATUS_DEFAULT_KEY()); if(saved!==null) defSel.value=saved; }catch(_){} } const originals=computeStatusesFromCurrentMapping(); originals.forEach(orig=>{ const row=document.createElement('div'); row.className='mapping-row'; const left=document.createElement('div'); left.textContent=orig||'(blank)'; const right=document.createElement('select'); CANON_STATUSES.forEach(o=>right.add(new Option(o,o))); const key=String(orig||'').toLowerCase(); right.value = STATUS_MAP[key] || (($('statusDefault')&&$('statusDefault').value) ? $('statusDefault').value : guessCanonicalStatus(orig)); right.dataset.orig=key; row.appendChild(left); row.appendChild(document.createTextNode('⇦')); row.appendChild(right); row.appendChild(document.createElement('div')); wrap.appendChild(row); }); const defSel2=$('statusDefault'); const applyAll=$('applyStatusDefaultAll'); if(defSel2){ defSel2.onchange=()=>{ try{ localStorage.setItem(STATUS_DEFAULT_KEY(), defSel2.value||''); }catch(_){} } } if(applyAll){ applyAll.onclick=()=>{ const v=($('statusDefault')&&$('statusDefault').value)||''; if(!v){ toast('Choose a default first','warn'); return;} document.querySelectorAll('#statusMapRows select').forEach(sel=> sel.value=v ); toast(`Applied ${v} to all statuses`); } }
+    }
+    function collectStatusMap(){ const map={}; document.querySelectorAll('#statusMapRows select').forEach(sel=>{ map[sel.dataset.orig]=sel.value; }); return map; }
+    function saveStatusMap(){ try{ STATUS_MAP=collectStatusMap(); localStorage.setItem(getStatusMapKey(), JSON.stringify(STATUS_MAP)); toast('Status mapping saved'); }catch(_){ toast('Failed to save status mapping','error'); } }
+    function loadStatusMap(){ try{ const raw=localStorage.getItem(getStatusMapKey()); if(!raw){ toast('No saved status mapping for this file','warn'); return; } STATUS_MAP=JSON.parse(raw)||{}; buildStatusMappingUI(); toast('Status mapping loaded'); }catch(_){ toast('Failed to load status mapping','error'); } }
+    function autoLoadStatusMap(){ try{ const raw=localStorage.getItem(getStatusMapKey()); if(!raw) return; STATUS_MAP=JSON.parse(raw)||{}; }catch(_){} }
+    function canonicalizeStatus(s){ if(!STATUS_MAP_ENABLED) return s; if(s==null) return ''; const key=String(s).toLowerCase(); const mapped=STATUS_MAP[key]; if(mapped) return mapped; let def=''; try{ def = localStorage.getItem(STATUS_DEFAULT_KEY()) || ''; }catch(_){} return def || s; }
+
+    // ===== OWNER MAPPING =====
+    let OWNER_MAP_ENABLED=false; let OWNER_MAP={};
+    function ownerEnabledKey(){ return 'pgmi:ownermap:enabled:'+(customer.sourceKey||'unknown'); }
+    function setOwnerMappingEnabled(v){ OWNER_MAP_ENABLED=!!v; const area=$('ownerMapArea'); if(area) area.style.display=v?'block':'none'; const btn=$('toggleOwnerMap'); if(btn) btn.textContent=v?'Disable owner mapping':'Enable owner mapping'; if(v){ buildOwnerMappingUI(); } try{ localStorage.setItem(ownerEnabledKey(), JSON.stringify(OWNER_MAP_ENABLED)); }catch(_){} }
+    function initOwnerMappingSection(){ const btn=$('toggleOwnerMap'); if(btn){ btn.onclick=()=> setOwnerMappingEnabled(!OWNER_MAP_ENABLED); } OWNER_MAP_ENABLED=false; const area=$('ownerMapArea'); if(area) area.style.display='none'; const b=$('toggleOwnerMap'); if(b) b.textContent='Enable owner mapping'; }
+    function buildOwnerMappingUI(){ const wrap=$('ownerMapRows'); if(!wrap) return; wrap.innerHTML=''; const originals=computeOwnersFromCurrentMapping(); originals.forEach(orig=>{ const row=document.createElement('div'); row.className='mapping-row'; const left=document.createElement('div'); left.className='col-name'; left.textContent=orig||'(blank)'; const sel=document.createElement('select'); sel.dataset.orig=(orig||'').toLowerCase(); sel.add(new Option('Leave as is','leave')); sel.add(new Option('Replace with…','replace')); const custom=document.createElement('input'); custom.type='text'; custom.placeholder='New owner value'; custom.style.display='none'; const saved=OWNER_MAP[sel.dataset.orig]; if(saved){ sel.value=saved.mode||'leave'; if(saved.mode==='replace'){ custom.style.display='block'; custom.value=saved.value||''; } }
+      sel.onchange=()=>{ if(sel.value==='replace'){ custom.style.display='block'; custom.focus(); OWNER_MAP[sel.dataset.orig]={mode:'replace', value:custom.value||''}; } else { custom.style.display='none'; OWNER_MAP[sel.dataset.orig]={mode:'leave'}; } };
+      custom.oninput=()=>{ OWNER_MAP[sel.dataset.orig] = { mode:'replace', value:custom.value }; };
+      row.appendChild(left);
+      const arrow=document.createElement('span'); arrow.className='arrow'; arrow.textContent='⇦'; row.appendChild(arrow);
+      row.appendChild(sel);
+      row.appendChild(custom); wrap.appendChild(row); }); }
+    function collectOwnerMap(){ const map={}; document.querySelectorAll('#ownerMapRows .mapping-row').forEach(row=>{ const sel=row.querySelector('select'); const custom=row.querySelector('input'); if(!sel) return; const key=(sel.dataset.orig||'').toLowerCase(); if(sel.value==='replace') map[key]={mode:'replace',value:(custom&&custom.value?custom.value:'')}; else map[key]={mode:'leave'}; }); return map; }
+
+    // ===== ROOM MAPPING =====
+    let ROOM_MAP_ENABLED=false; let ROOM_MAP={};
+    function setRoomMappingEnabled(v){ ROOM_MAP_ENABLED=!!v; const area=$('roomMapArea'); if(area) area.style.display=v?'block':'none'; const btn=$('toggleRoomMap'); if(btn) btn.textContent=v?'Disable room mapping':'Enable room mapping'; if(v){ buildRoomMappingUI(); } }
+    function initRoomMappingSection(){ const btn=$('toggleRoomMap'); if(btn){ btn.onclick=()=> setRoomMappingEnabled(!ROOM_MAP_ENABLED); } ROOM_MAP_ENABLED=false; const area=$('roomMapArea'); if(area) area.style.display='none'; const b=$('toggleRoomMap'); if(b) b.textContent='Enable room mapping'; }
+    function buildRoomMappingUI(){ const wrap=$('roomMapRows'); if(!wrap) return; wrap.innerHTML=''; const originals=computeRoomsFromCurrentMapping(); originals.forEach(orig=>{ const row=document.createElement('div'); row.className='mapping-row'; const left=document.createElement('div'); left.className='col-name'; left.textContent=orig||'(blank)'; const sel=document.createElement('select'); sel.dataset.orig=(orig||'').toLowerCase(); sel.add(new Option('Leave as is','leave')); sel.add(new Option('Replace with…','replace')); const custom=document.createElement('input'); custom.type='text'; custom.placeholder='New room value'; custom.style.display='none'; const saved=ROOM_MAP[sel.dataset.orig]; if(saved){ sel.value=saved.mode||'leave'; if(saved.mode==='replace'){ custom.style.display='block'; custom.value=saved.value||''; } }
+      sel.onchange=()=>{ if(sel.value==='replace'){ custom.style.display='block'; custom.focus(); ROOM_MAP[sel.dataset.orig]={mode:'replace', value:custom.value||''}; } else { custom.style.display='none'; ROOM_MAP[sel.dataset.orig]={mode:'leave'}; } };
+      custom.oninput=()=>{ ROOM_MAP[sel.dataset.orig] = { mode:'replace', value:custom.value }; };
+      row.appendChild(left);
+      const arrow=document.createElement('span'); arrow.className='arrow'; arrow.textContent='⇦'; row.appendChild(arrow);
+      row.appendChild(sel);
+      row.appendChild(custom); wrap.appendChild(row); }); }
+    function collectRoomMap(){ const map={}; document.querySelectorAll('#roomMapRows .mapping-row').forEach(row=>{ const sel=row.querySelector('select'); const custom=row.querySelector('input'); if(!sel) return; const key=(sel.dataset.orig||'').toLowerCase(); if(sel.value==='replace') map[key]={mode:'replace',value:(custom&&custom.value?custom.value:'')}; else map[key]={mode:'leave'}; }); return map; }
+
+    // ===== Find & Replace helpers =====
+    const RE_ESCAPER=/[.*+?^${}()|[\]\\]/g;
+    function genericFindReplace(raw, map){ if(raw==null) return ''; let out=String(raw); try{ for(const [k,cfg] of Object.entries(map||{})){ if(!cfg||cfg.mode!=='replace'||!k) continue; const safe=k.replace(RE_ESCAPER,'\\    function computeOwnersFromCurrentMapping(){ const rows=Array.from(document.querySelectorAll('#mappingRows .mapping-row')); const ownerRow=rows.find(r=>{ const lbl=r.children[0]; const key=(lbl.firstChild&&lbl.firstChild.nodeType===Node.TEXT_NODE)?lbl.firstChild.nodeValue:lbl.textContent.replace('required','').trim(); return key==='owner';}); if(!ownerRow) return []; const sel=ownerRow.children[1]; const tr=ownerRow.children[2]; const constant=ownerRow.children[3]; const vals=[]; for(const src of (customer.rows||[])){ let v=''; if(sel&&sel.value){ v=src[sel.value]; } if(FALLBACK_DEFAULT_COLUMNS.has('owner') && (!v||v==='') && constant && constant.value){ v=constant.value; } v=applyTransform(v, tr?tr.value:'none'); if(v!=null) vals.push(String(v).trim()); } return uniqueCaseInsensitive(vals).filter(Boolean).sort((a,b)=>a.localeComp'); const re=new RegExp(safe,'gi'); out=out.replace(re, (cfg.value!=null?String(cfg.value):'')); } }catch(_){} return out; }
+    function canonicalizeOwner(o,mapOpt){ const raw=(o==null?'':String(o)); const map=mapOpt||OWNER_MAP; const exact=map && map[String(raw).trim().toLowerCase()]; if(exact && exact.mode==='replace') return (exact.value!=null?String(exact.value):''); return genericFindReplace(raw,map); }
+    function canonicalizeRoomCell(cell,mapOpt){ const raw=(cell==null?'':String(cell)); const map=mapOpt||ROOM_MAP; const exact=map && map[String(raw).trim().toLowerCase()]; if(exact && exact.mode==='replace') return (exact.value!=null?String(exact.value):''); return genericFindReplace(raw,map); }
+    function canonicalizeRoomValue(cell){
+      const seps=getRoomSeps();
+      const tokens=splitRooms(cell,seps).map(t=>normalizeRoom(canonicalizeRoomCell(t, ROOM_MAP))).filter(Boolean);
+      const uniq=uniqueCaseInsensitive(tokens);
+      const mode=($('roomSepMode')&&$('roomSepMode').value)||'leave';
+      let joiner=', ';
+      if(mode==='replace'){
+        const repl=($('roomSepReplace')&&typeof $('roomSepReplace').value==='string')?$('roomSepReplace').value:'';
+        joiner=repl==null? ', ' : String(repl);
+      } else {
+        const exp=($('roomSep')&&$('roomSep').value)||',';
+        joiner = exp === '' ? '' : (exp.trim() === exp ? exp + ' ' : exp);
+      }
+      return uniq.join(joiner);
+    }
+
+    // ===== Export helpers =====
+    function replaceRoomSeps(str,seps,repl){ if(str==null) return ''; const list=splitRooms(str,seps); if(!repl && repl!=='') repl=', '; return list.join(repl); }
+    function autoFitWidths(ws, columns){ columns.forEach(colIdx=>{ const col=ws.getColumn(colIdx); let max=0; col.eachCell({ includeEmpty:true }, (cell)=>{ const v=(cell.value==null?'':String(cell.value)); max=Math.max(max, v.length); }); max=Math.max(max, 10); max=Math.min(max+2, 60); col.width=max; col.alignment={ wrapText:false }; }); }
+    function ownerMappingIsActive(){ if(OWNER_MAP_ENABLED) return true; try{ return Object.values(collectOwnerMap()).some(cfg=>cfg && cfg.mode==='replace'); }catch(_){ return false; } }
+    function roomMappingIsActive(){ if(ROOM_MAP_ENABLED) return true; try{ return Object.values(collectRoomMap()).some(cfg=>cfg && cfg.mode==='replace'); }catch(_){ return false; } }
