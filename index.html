@@ -861,5 +861,119 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 </script>
 <!-- ==== /3seats patch ==== -->
 
+<!-- ==== 3seats: Export to Google Sheet using picked Excel (incognito-proof) ==== -->
+<script async defer src="https://apis.google.com/js/api.js"></script>
+<script async defer src="https://accounts.google.com/gsi/client"></script>
+<script>
+async function exportToSheets(){
+  try{
+    // Always pick the Excel that was just downloaded by "Generate"
+    const picked = await new Promise((resolve)=>{
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      inp.style.position = 'fixed'; inp.style.left = '-9999px';
+      document.body.appendChild(inp);
+      inp.addEventListener('change', ()=> resolve(inp.files && inp.files[0] ? inp.files[0] : null));
+      inp.click();
+    });
+    if (!picked){ alert("No Excel selected. Please pick the Excel you just downloaded from Generate."); return; }
+
+    // Load Google APIs (safe if already loaded)
+    await new Promise((resolve,reject)=>{ gapi.load("client", async ()=>{ try{ await gapi.client.init({}); resolve(); }catch(e){ reject(e); } }); });
+    await gapi.client.load("https://www.googleapis.com/discovery/v1/apis/drive/v3/rest");
+    await gapi.client.load("https://sheets.googleapis.com/$discovery/rest?version=v4");
+
+    // OAuth
+    const tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: "7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com",
+      scope: "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets",
+      use_fedcm_for_prompt: true,
+      callback: ()=>{}
+    });
+    const accessToken = await new Promise((resolve,reject)=>{
+      tokenClient.callback = (r)=> r && r.access_token ? resolve(r.access_token) : reject(new Error(r?.error||"No token"));
+      tokenClient.requestAccessToken({prompt:"consent"});
+    });
+    gapi.client.setToken({access_token: accessToken});
+
+    // Copy your template first (so it lives in your Sheet with your email tooling)
+    const TEMPLATE_ID = "1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
+    const baseName = ((document.getElementById("fileName")?.value || "master_output").trim()||"master_output").replace(/\s+/g,"_");
+    const gsName = baseName + " (Google Sheet)";
+    const copyRes = await gapi.client.drive.files.copy({
+      fileId: TEMPLATE_ID, supportsAllDrives: true, fields: "id", resource: { name: gsName }
+    });
+    const destSpreadsheetId = copyRes.result.id;
+
+    async function waitReady(id){
+      for (let i=1;i<=10;i++){
+        try { const r = await gapi.client.sheets.spreadsheets.get({ spreadsheetId:id, fields:"spreadsheetId" }); if (r?.result?.spreadsheetId) return; } catch(_){}
+        await new Promise(r=>setTimeout(r, 300*i));
+      }
+      throw new Error("Sheet not ready.");
+    }
+    await waitReady(destSpreadsheetId);
+
+    // Upload & CONVERT the picked Excel -> temp Google Sheet
+    async function uploadAndConvertXlsx(blob, name){
+      const metadata = new Blob([JSON.stringify({ name: name + " (Converted)", mimeType: "application/vnd.google-apps.spreadsheet" })], { type: "application/json" });
+      const boundary = "-------314159265358979323846";
+      const delimiter = "\r\n--" + boundary + "\r\n";
+      const closeDelim = "\r\n--" + boundary + "--";
+      const body = new Blob([
+        delimiter, 'Content-Type: application/json; charset=UTF-8\r\n\r\n', metadata,
+        delimiter, 'Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n', blob, closeDelim
+      ], { type: "multipart/related; boundary=" + boundary });
+
+      const res = await gapi.client.request({
+        path: "/upload/drive/v3/files?uploadType=multipart&fields=id",
+        method: "POST",
+        body,
+        headers: { "Content-Type": "multipart/related; boundary=" + boundary }
+      });
+      return res.result.id; // Google Sheet ID (converted)
+    }
+    const sourceSpreadsheetId = await uploadAndConvertXlsx(picked, baseName);
+
+    // Copy ALL sheets from the converted file into the template copy
+    async function getSheetList(id){
+      const res = await gapi.client.sheets.spreadsheets.get({ spreadsheetId:id, fields:"sheets(properties(sheetId,title,index))" });
+      return (res.result.sheets||[]).map(s=>s.properties);
+    }
+    const srcSheets = await getSheetList(sourceSpreadsheetId);
+
+    async function copySheetTo(srcSheetId, dstId){
+      const r = await gapi.client.sheets.spreadsheets.sheets.copyTo({
+        spreadsheetId: sourceSpreadsheetId,
+        sheetId: srcSheetId,
+        resource: { destinationSpreadsheetId: dstId }
+      });
+      return r.result;
+    }
+    const addedSheets = [];
+    for (const s of srcSheets){ addedSheets.push(await copySheetTo(s.sheetId, destSpreadsheetId)); }
+
+    // Remove any placeholder sheets from the template copy (keeps only inserted ones)
+    const existing = await getSheetList(destSpreadsheetId);
+    const toDelete = existing.filter(p => !addedSheets.some(a => a.sheetId === p.sheetId));
+    if (toDelete.length){
+      await gapi.client.sheets.spreadsheets.batchUpdate({
+        spreadsheetId: destSpreadsheetId,
+        resource: { requests: toDelete.map(p => ({ deleteSheet: { sheetId: p.sheetId } })) }
+      });
+    }
+
+    // Open the final Sheet
+    window.open(`https://docs.google.com/spreadsheets/d/${destSpreadsheetId}/edit`, "_blank");
+  }catch(e){
+    console.error(e);
+    alert("Export failed: " + (e?.result?.error?.message || e.message || String(e)));
+  }
+}
+// Make sure your existing button can call it
+window.exportToSheets = exportToSheets;
+</script>
+<!-- ==== /3seats patch ==== -->
 </body>
 </html>
