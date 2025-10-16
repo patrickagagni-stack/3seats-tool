@@ -591,15 +591,18 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     document.addEventListener('DOMContentLoaded',()=>{ try{ wireDnD(); }catch(_){} });
   </script>
 
-<!-- ===== Export to Google Sheet (v9b) ===== -->
+
+<!-- ===== Export to Google Sheet (v9c) ===== -->
 <script async defer src="https://apis.google.com/js/api.js"></script>
 <script async defer src="https://accounts.google.com/gsi/client"></script>
 <script>
 (function(){
+  // === YOUR CONFIG ===
   const CLIENT_ID   = "7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com";
   const TEMPLATE_ID = "1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
   const SCOPES      = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets";
 
+  // Add a button next to your existing Export button
   document.addEventListener("DOMContentLoaded", ()=>{
     const anchorBtn = document.querySelector('#exportBtn');
     if (anchorBtn && !document.getElementById('exportToSheetsBtn')) {
@@ -615,6 +618,7 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     if (b) b.addEventListener("click", exportToSheets);
   });
 
+  // ---- Google boot / auth ----
   async function gapiBoot(){
     await new Promise((resolve,reject)=>{ gapi.load("client", async ()=>{ try{ await gapi.client.init({}); resolve(); }catch(e){ reject(e); } }); });
     await gapi.client.load("https://www.googleapis.com/discovery/v1/apis/drive/v3/rest");
@@ -630,6 +634,8 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
       tokenClient.requestAccessToken({ prompt: forceConsent ? "consent" : "select_account" });
     });
   }
+
+  // ---- Drive/Sheets helpers ----
   async function driveCopy(templateId, name){
     const res = await gapi.client.drive.files.copy({ fileId: templateId, supportsAllDrives: true, fields: "id", resource: { name } });
     return res.result.id;
@@ -664,16 +670,19 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     });
   }
 
+  // ---------- FULL DATA CAPTURE ----------
+  function normalize(headers, bodyRows){
+    const seen={}; const H=headers.map(h=>{ let k=(h||'').trim()||'Column', b=k, i=1; while(seen[k]){ i++; k=\`\${b}_\${i}\`; } seen[k]=true; return k; });
+    const outRows = bodyRows.filter(r=>r.some(v=>v!=='')).map(r=>{ const o={}; for(let i=0;i<H.length;i++) o[H[i]]=(r[i]??'').trim(); return o; });
+    return { headersOut:H, outRows };
+  }
   function tryGlobalData(){
     try{
       const keys = Object.keys(window);
       for (const k of keys){
         const v = window[k];
-        if (Array.isArray(v) && v.length >= 20 && typeof v[0] === "object" && !Array.isArray(v[0])) {
+        if (Array.isArray(v) && v.length >= 20 && typeof v[0] === 'object' && !Array.isArray(v[0])) {
           const headers = Object.keys(v[0]); if (!headers.length) continue;
-          let consistent = true;
-          for (let i=1;i<Math.min(v.length,200);i++){ const ki = Object.keys(v[i]); if (ki.length !== headers.length) { consistent=false; break; } }
-          if (!consistent) continue;
           const outRows = v.map(row => { const o={}; for (const h of headers) o[h] = row[h]==null?'':String(row[h]).trim(); return o; });
           return { headersOut: headers, outRows, source:"global:"+k };
         }
@@ -682,41 +691,83 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     return null;
   }
   function tryDataTables(){
-    const t = document.querySelector("table");
-    if (!t) return null;
-    const hasDT = (window.jQuery && jQuery.fn && jQuery.fn.dataTable) || (window.DataTable && typeof window.DataTable === "function");
+    const t = document.querySelector('table'); if (!t) return null;
+    const hasDT = (window.jQuery && jQuery.fn && jQuery.fn.dataTable) || (window.DataTable && typeof window.DataTable === 'function');
     if (!hasDT) return null;
     try {
       const api = jQuery && jQuery.fn && jQuery.fn.dataTable ? jQuery(t).DataTable() : new DataTable(t);
-      const headers = Array.from(t.querySelectorAll("thead th, thead td")).map(x=>x.textContent.trim());
+      try { if (api.page && api.page.len) { api.page.len(-1).draw(); } } catch(_){}
+      const headers = Array.from(t.querySelectorAll('thead th, thead td')).map(x=>x.textContent.trim());
       const rows = api.rows({ search:"applied" }).data().toArray().map(arr=>arr.map(cell=>{
         const div=document.createElement('div'); div.innerHTML=String(cell); return div.textContent.trim();
       }));
-      const seen={}; const H=headers.map(h=>{ let k=(h||"").trim()||"Column", b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
-      const outRows = rows.map(r=>{ const o={}; for(let i=0;i<H.length;i++) o[H[i]]=(r[i]??"").trim(); return o; });
-      return { headersOut:H, outRows, source:"datatables" };
+      const norm = normalize(headers, rows);
+      return { ...norm, source:"datatables" };
     } catch(_){ return null; }
   }
-  async function scrapeAllPages(){
-    const table = document.querySelector("table");
-    if (!table) return null;
-    function extractCurrent(){
-      const thead=table.querySelector("thead"), tbody=table.querySelector("tbody");
-      let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll("th,td")).map(x=>x.textContent.trim());
-      const rowEls = tbody ? Array.from(tbody.querySelectorAll("tr")) : Array.from(table.querySelectorAll("tr"));
-      const bodyRows = rowEls.map(tr=>Array.from(tr.querySelectorAll("td,th")).map(td=>td.textContent.trim()));
-      if (!headers.length && bodyRows.length) { headers = bodyRows.shift(); }
-      const rows = bodyRows.filter(r=>r.some(v=>v!==''));
-      return { headers, rows };
+  async function trySetPageLength(){
+    const selects = [
+      '.dataTables_length select','select[name$="_length"]','select[aria-label*="rows"]','select[aria-label*="Rows"]','select[aria-label*="per page"]','select[aria-label*="Per Page"]'
+    ];
+    for (const sel of selects){
+      const el = document.querySelector(sel);
+      if (el){
+        for (const val of ['-1','1000','500','All','9999']){
+          try { el.value = val; el.dispatchEvent(new Event('change',{bubbles:true})); await new Promise(r=>setTimeout(r,300)); } catch(_){}
+        }
+      }
     }
-    const nextSelectors = ['.paginate_button.next','button[aria-label="Next"]','a[aria-label="Next"]','a[rel="next"]','button.next','a.next'];
-    let btn = null;
-    for (const sel of nextSelectors){ const el = document.querySelector(sel); if (el){ btn=el; break; } }
+  }
+  async function scrapeAllPages(){
+    const table = document.querySelector('table'); if (!table) return null;
+    await trySetPageLength(); // expand rows/page first
+
+    function extractCurrent(){
+      const thead=table.querySelector('thead'), tbody=table.querySelector('tbody');
+      let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll('th,td')).map(x=>x.textContent.trim());
+      const rowEls = tbody ? Array.from(tbody.querySelectorAll('tr')) : Array.from(table.querySelectorAll('tr'));
+      const bodyRows = rowEls.map(tr=>Array.from(tr.querySelectorAll('td,th')).map(td=>td.textContent.trim()));
+      if (!headers.length && bodyRows.length) { headers = bodyRows.shift(); }
+      const rows = bodyRows.filter(r=>r.some(v=>v!=='')); return { headers, rows };
+    }
+
+    // try infinite scroll
+    const scroller = table.parentElement || table;
+    let last = -1, same=0;
+    for (let i=0;i<60;i++){
+      scroller.scrollTop = scroller.scrollHeight + 2000;
+      await new Promise(r=>setTimeout(r,150));
+      const now = (scroller.innerText || scroller.textContent || '').length;
+      if (now === last) { if (++same>5) break; } else { same=0; last=now; }
+    }
+
     const allRows=[]; let headers=[];
     async function onePage(){ const {headers:h, rows} = extractCurrent(); if (!headers.length && h.length) headers=h; allRows.push(...rows); }
     await onePage();
+
+    // click numeric page buttons
+    const pageLinkSelectors = [
+      'ul.pagination li a','.pagination a','[role="navigation"] .pagination a','nav[aria-label*="pagination"] a',
+      'button[aria-label^="Page"]','a[aria-label^="Page"]','.paginate_button:not(.previous):not(.next)'
+    ];
+    function uniqueLinks(){
+      const set=new Set(), out=[];
+      for (const sel of pageLinkSelectors){
+        document.querySelectorAll(sel).forEach(a=>{
+          const key = (a.textContent||'').trim()+"|"+(a.getAttribute('href')||'')+"|"+(a.getAttribute('data-page')||'');
+          if (!set.has(key)) { set.add(key); out.push(a); }
+        });
+      }
+      return out;
+    }
+    const numerics = uniqueLinks().filter(a=>/^\d+$/.test((a.textContent||'').trim()));
+    for (const a of numerics){ a.click(); await new Promise(r=>setTimeout(r,200)); await onePage(); }
+
+    // next-loop fallback
+    const nextSelectors = ['.paginate_button.next','button[aria-label="Next"]','a[aria-label="Next"]','a[rel="next"]','button.next','a.next'];
+    let btn = null; for (const sel of nextSelectors){ const el = document.querySelector(sel); if (el){ btn=el; break; } }
     let guard=0;
-    while (btn && !btn.classList.contains("disabled") && guard<200){
+    while (btn && !btn.classList.contains('disabled') && guard<200){
       guard++;
       const before = table.innerText.length;
       btn.click();
@@ -728,29 +779,23 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
         tries++;
       }
       await onePage();
-      let newBtn=null;
-      for (const sel of nextSelectors){ const el=document.querySelector(sel); if (el){ newBtn=el; break; } }
+      let newBtn=null; for (const sel of nextSelectors){ const el=document.querySelector(sel); if (el){ newBtn=el; break; } }
       if (!newBtn || newBtn===btn) break;
       btn=newBtn;
     }
+
     if (!headers.length) return null;
-    const seen={}, H=headers.map(h=>{ let k=(h||"").trim()||"Column", b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
-    const outRows = allRows.map(r=>{ const o={}; for(let i=0;i<H.length;i++) o[H[i]]=(r[i]??'').trim(); return o; });
-    return { headersOut:H, outRows, source:"pagination" };
+    return normalize(headers, allRows);
   }
   function fallbackScrape(){
-    const table = document.querySelector("table");
-    if (!table) return null;
-    const thead=table.querySelector("thead"), tbody=table.querySelector("tbody");
-    let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll("th,td")).map(x=>x.textContent.trim());
-    const rowEls = tbody ? Array.from(tbody.querySelectorAll("tr")) : Array.from(table.querySelectorAll("tr"));
-    const bodyRows = rowEls.map(tr=>Array.from(tr.querySelectorAll("td,th")).map(td=>td.textContent.trim()));
+    const table = document.querySelector('table'); if (!table) return null;
+    const thead=table.querySelector('thead'), tbody=table.querySelector('tbody');
+    let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll('th,td')).map(x=>x.textContent.trim());
+    const rowEls = tbody ? Array.from(tbody.querySelectorAll('tr')) : Array.from(table.querySelectorAll('tr'));
+    const bodyRows = rowEls.map(tr=>Array.from(tr.querySelectorAll('td,th')).map(td=>td.textContent.trim()));
     if (!headers.length && bodyRows.length) { headers = bodyRows.shift(); }
-    const seen={}; const H=headers.map(h=>{ let k=(h||"").trim()||"Column", b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
-    const outRows = bodyRows.filter(r=>r.some(v=>v!=='')).map(r=>{ const o={}; for(let i=0;i<H.length;i++) o[H[i]]=(r[i]??'').trim(); return o; });
-    return { headersOut:H, outRows, source:"single" };
+    return normalize(headers, bodyRows);
   }
-
   async function getAllTableData(){
     const g = tryGlobalData(); if (g && g.outRows.length) return g;
     const d = tryDataTables(); if (d && d.outRows.length) return d;
@@ -758,6 +803,7 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     return fallbackScrape();
   }
 
+  // ---------- Build Lists (Column L fix) ----------
   function computeLists(headersOut, outRows){
     const owners=new Set(), rooms=new Set(), statuses=new Set();
     const idx=(needle)=>{ const lc=headersOut.map(h=>(h||'').toLowerCase()); const e=lc.indexOf(needle.toLowerCase()); if(e!==-1) return e; for(let i=0;i<lc.length;i++) if(lc[i].includes(needle.toLowerCase())) return i; return -1; };
@@ -775,6 +821,7 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     return { rooms:[...rooms], owners:[...owners], statuses:unmatchedStatus, nonMatched };
   }
 
+  // ---------- Main ----------
   async function exportToSheets(){
     try{
       const snap = await getAllTableData();
@@ -789,9 +836,9 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
       for (let i=0;i<maxLen;i++){
         const A=lists.rooms[i]||"", D=lists.owners[i]||"", G=lists.statuses[i]||"";
         const row=i+2;
-        const I=`=IF(A${row}="","",IF(COUNTIF($B:$B,A${row})>0,"",A${row}))`;
-        const J=`=IF(D${row}="","",IF(COUNTIF($E:$E,D${row})>0,"",D${row}))`;
-        const K=`=IF(G${row}="","",IF(ISNUMBER(MATCH(G${row},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G${row}))`;
+        const I=\`=IF(A\${row}="","",IF(COUNTIF($B:$B,A\${row})>0,"",A\${row}))\`;
+        const J=\`=IF(D\${row}="","",IF(COUNTIF($E:$E,D\${row})>0,"",D\${row}))\`;
+        const K=\`=IF(G\${row}="","",IF(ISNUMBER(MATCH(G\${row},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G\${row}))\`;
         listsGrid.push([A,"","",D,"","",G,"",I,J,K, (lists.nonMatched[i]||"") ]);
       }
 
@@ -819,7 +866,6 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
   }
 })();
 </script>
-<!-- ===== /Export to Google Sheet (v9b) ===== -->
-
+<!-- ===== /Export to Google Sheet (v9c) ===== -->
 </body>
 </html>
