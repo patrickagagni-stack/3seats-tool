@@ -30,7 +30,6 @@
     .hint{font-size:11px;color:#aab8f5}
     .notice{border-left:4px solid var(--warn);background:#2a210e;padding:10px 12px;border-radius:8px;color:#ffd78a}
     .danger{border-left:4px solid var(--err);background:#2a1414;padding:10px 12px;border-radius:8px;color:#ffb3b3}
-    .success{border-left:4px solid var(--ok);background:#142a1f;padding:10px 12px;border-radius:8px;color:#b3ffcc}
     table{width:100%;border-collapse:separate;border-spacing:0}
     th,td{padding:10px 12px;border-bottom:1px solid #202a55}
     th{position:sticky;top:0;background:#121a34;text-align:left;font-size:12px;color:#c8d4ff}
@@ -201,14 +200,14 @@
         sel.dataset.master=hdr; const best=guessMatch(hdr,customer.headers); if(best) sel.value=best; cacheSelectOptions(sel); sel.addEventListener('change', ()=>{ syncSourceOptions(); });
         const transform=document.createElement('select');
         const options=[
-          {val:'none', label:'none — leave as is'},
-          {val:'trim', label:'trim — remove spaces both ends'},
-          {val:'ltrim', label:'ltrim — remove leading spaces'},
-          {val:'rtrim', label:'rtrim — remove trailing spaces'},
-          {val:'upper', label:'upper — HELLO WORLD'},
-          {val:'lower', label:'lower — hello world'},
-          {val:'title', label:'title — Hello World'},
-          {val:'digits-only', label:'digits-only — 12345'},
+          {val:'none', label:'none – leave as is'},
+          {val:'trim', label:'trim – remove spaces both ends'},
+          {val:'ltrim', label:'ltrim – remove leading spaces'},
+          {val:'rtrim', label:'rtrim – remove trailing spaces'},
+          {val:'upper', label:'upper – HELLO WORLD'},
+          {val:'lower', label:'lower – hello world'},
+          {val:'title', label:'title – Hello World'},
+          {val:'digits-only', label:'digits-only – 12345'},
           {val:'date:MM/DD/YYYY', label:'date → 12/31/2025 (MM/DD/YYYY)'},
           {val:'date:YYYY-MM-DD', label:'date → 2025-12-31 (YYYY-MM-DD)'},
           {val:'date:DD/MM/YYYY', label:'date → 31/12/2025 (DD/MM/YYYY)'}
@@ -261,7 +260,7 @@
     function initStatusMappingSection(){ STATUS_MAP_ENABLED=false; const area=$('statusMapArea'); if(area) area.style.display='none'; const btn=$('toggleStatusMap'); if(btn){ btn.textContent='Enable status mapping'; btn.onclick=()=> setStatusMappingEnabled(!STATUS_MAP_ENABLED); } }
     function getStatusMapKey(){ return 'pgmi:statusmap:'+(customer.sourceKey||'unknown'); }
     function guessCanonicalStatus(s){ const t=String(s||'').toLowerCase(); if(/prospect|lead|inquiry|enquir/.test(t)) return 'Prospect'; if(/tentative|pending|hold|penc?il/.test(t)) return 'Tentative'; if(/definite|confirmed|booked|contract|firm|guaranteed/.test(t)) return 'Definite'; if(/closed(?!.*lost)|won|completed|fulfilled/.test(t)) return 'Closed'; if(/lost|cancel|cancell|closed.*lost|abandoned|declined/.test(t)) return 'Lost'; return 'Tentative'; }
-    function buildStatusMappingUI(){ const wrap=$('statusMapRows'); if(!wrap) return; wrap.innerHTML=''; const defSel=$('statusDefault'); if(defSel){ try{ const saved=localStorage.getItem(STATUS_DEFAULT_KEY()); if(saved!==null) defSel.value=saved; }catch(_){} } const originals=computeStatusesFromCurrentMapping(); originals.forEach(orig=>{ const row=document.createElement('div'); row.className='mapping-row'; const left=document.createElement('div'); left.textContent=orig||'(blank)'; const right=document.createElement('select'); CANON_STATUSES.forEach(o=>right.add(new Option(o,o))); const key=String(orig||'').toLowerCase(); right.value = STATUS_MAP[key] || (($('statusDefault')&&$('statusDefault').value) ? $('statusDefault').value : guessCanonicalStatus(orig)); right.dataset.orig=key; row.appendChild(left); row.appendChild(document.createTextNode('⇦')); row.appendChild(right); row.appendChild(document.createElement('div')); wrap.appendChild(row); }); const defSel2=$('statusDefault'); const applyAll=$('applyStatusDefaultAll'); if(defSel2){ defSel2.onchange=()=>{ try{ localStorage.setItem(STATUS_DEFAULT_KEY(), defSel2.value||''); }catch(_){} } } if(applyAll){ applyAll.onclick=()=>{ const v=($('statusDefault')&&$('statusDefault').value)||''; if(!v){ toast('Choose a default first','warn'); return;} document.querySelectorAll('#statusMapRows select').forEach(sel=> sel.value=v ); toast(`Applied ${v} to all statuses`); } }
+    function buildStatusMappingUI(){ const wrap=$('statusMapRows'); if(!wrap) return; wrap.innerHTML=''; const defSel=$('statusDefault'); if(defSel){ try{ const saved=localStorage.getItem(STATUS_DEFAULT_KEY()); if(saved!==null) defSel.value=saved; }catch(_){} } const originals=computeStatusesFromCurrentMapping(); originals.forEach(orig=>{ const row=document.createElement('div'); row.className='mapping-row'; const left=document.createElement('div'); left.textContent=orig||'(blank)'; const right=document.createElement('select'); CANON_STATUSES.forEach(o=>right.add(new Option(o,o))); const key=String(orig||'').toLowerCase(); right.value = STATUS_MAP[key] || (($('statusDefault')&&$('statusDefault').value) ? $('statusDefault').value : guessCanonicalStatus(orig)); right.dataset.orig=key; row.appendChild(left); row.appendChild(document.createTextNode('↦')); row.appendChild(right); row.appendChild(document.createElement('div')); wrap.appendChild(row); }); const defSel2=$('statusDefault'); const applyAll=$('applyStatusDefaultAll'); if(defSel2){ defSel2.onchange=()=>{ try{ localStorage.setItem(STATUS_DEFAULT_KEY(), defSel2.value||''); }catch(_){} } } if(applyAll){ applyAll.onclick=()=>{ const v=($('statusDefault')&&$('statusDefault').value)||''; if(!v){ toast('Choose a default first','warn'); return;} document.querySelectorAll('#statusMapRows select').forEach(sel=> sel.value=v ); toast(`Applied ${v} to all statuses`); } }
     }
     function collectStatusMap(){ const map={}; document.querySelectorAll('#statusMapRows select').forEach(sel=>{ map[sel.dataset.orig]=sel.value; }); return map; }
     function saveStatusMap(){ try{ STATUS_MAP=collectStatusMap(); localStorage.setItem(getStatusMapKey(), JSON.stringify(STATUS_MAP)); toast('Status mapping saved'); }catch(_){ toast('Failed to save status mapping','error'); } }
@@ -278,7 +277,7 @@
       sel.onchange=()=>{ if(sel.value==='replace'){ custom.style.display='block'; custom.focus(); OWNER_MAP[sel.dataset.orig]={mode:'replace', value:custom.value||''}; } else { custom.style.display='none'; OWNER_MAP[sel.dataset.orig]={mode:'leave'}; } };
       custom.oninput=()=>{ OWNER_MAP[sel.dataset.orig] = { mode:'replace', value:custom.value }; };
       row.appendChild(left);
-      const arrow=document.createElement('span'); arrow.className='arrow'; arrow.textContent='⇦'; row.appendChild(arrow);
+      const arrow=document.createElement('span'); arrow.className='arrow'; arrow.textContent='↦'; row.appendChild(arrow);
       row.appendChild(sel);
       row.appendChild(custom); wrap.appendChild(row); }); }
     function collectOwnerMap(){ const map={}; document.querySelectorAll('#ownerMapRows .mapping-row').forEach(row=>{ const sel=row.querySelector('select'); const custom=row.querySelector('input'); if(!sel) return; const key=(sel.dataset.orig||'').toLowerCase(); if(sel.value==='replace') map[key]={mode:'replace',value:(custom&&custom.value?custom.value:'')}; else map[key]={mode:'leave'}; }); return map; }
@@ -291,14 +290,14 @@
       sel.onchange=()=>{ if(sel.value==='replace'){ custom.style.display='block'; custom.focus(); ROOM_MAP[sel.dataset.orig]={mode:'replace', value:custom.value||''}; } else { custom.style.display='none'; ROOM_MAP[sel.dataset.orig]={mode:'leave'}; } };
       custom.oninput=()=>{ ROOM_MAP[sel.dataset.orig] = { mode:'replace', value:custom.value }; };
       row.appendChild(left);
-      const arrow=document.createElement('span'); arrow.className='arrow'; arrow.textContent='⇦'; row.appendChild(arrow);
+      const arrow=document.createElement('span'); arrow.className='arrow'; arrow.textContent='↦'; row.appendChild(arrow);
       row.appendChild(sel);
       row.appendChild(custom); wrap.appendChild(row); }); }
     function collectRoomMap(){ const map={}; document.querySelectorAll('#roomMapRows .mapping-row').forEach(row=>{ const sel=row.querySelector('select'); const custom=row.querySelector('input'); if(!sel) return; const key=(sel.dataset.orig||'').toLowerCase(); if(sel.value==='replace') map[key]={mode:'replace',value:(custom&&custom.value?custom.value:'')}; else map[key]={mode:'leave'}; }); return map; }
 
     // ===== Find & Replace helpers =====
-    const RE_ESCAPER=/[.*+?^${}()|[\]\\]/g;
-    function genericFindReplace(raw, map){ if(raw==null) return ''; let out=String(raw); try{ for(const [k,cfg] of Object.entries(map||{})){ if(!cfg||cfg.mode!=='replace'||!k) continue; const safe=k.replace(RE_ESCAPER,'\\    function computeOwnersFromCurrentMapping(){ const rows=Array.from(document.querySelectorAll('#mappingRows .mapping-row')); const ownerRow=rows.find(r=>{ const lbl=r.children[0]; const key=(lbl.firstChild&&lbl.firstChild.nodeType===Node.TEXT_NODE)?lbl.firstChild.nodeValue:lbl.textContent.replace('required','').trim(); return key==='owner';}); if(!ownerRow) return []; const sel=ownerRow.children[1]; const tr=ownerRow.children[2]; const constant=ownerRow.children[3]; const vals=[]; for(const src of (customer.rows||[])){ let v=''; if(sel&&sel.value){ v=src[sel.value]; } if(FALLBACK_DEFAULT_COLUMNS.has('owner') && (!v||v==='') && constant && constant.value){ v=constant.value; } v=applyTransform(v, tr?tr.value:'none'); if(v!=null) vals.push(String(v).trim()); } return uniqueCaseInsensitive(vals).filter(Boolean).sort((a,b)=>a.localeComp'); const re=new RegExp(safe,'gi'); out=out.replace(re, (cfg.value!=null?String(cfg.value):'')); } }catch(_){} return out; }
+    const RE_ESCAPER=/[.*+?^${}()|[\]\\]/g; // escape for RegExp
+    function genericFindReplace(raw, map){ if(raw==null) return ''; let out=String(raw); try{ for(const [k,cfg] of Object.entries(map||{})){ if(!cfg||cfg.mode!=='replace'||!k) continue; const safe=k.replace(RE_ESCAPER,'\\$&'); const re=new RegExp(safe,'gi'); out=out.replace(re, (cfg.value!=null?String(cfg.value):'')); } }catch(_){} return out; }
     function canonicalizeOwner(o,mapOpt){ const raw=(o==null?'':String(o)); const map=mapOpt||OWNER_MAP; const exact=map && map[String(raw).trim().toLowerCase()]; if(exact && exact.mode==='replace') return (exact.value!=null?String(exact.value):''); return genericFindReplace(raw,map); }
     function canonicalizeRoomCell(cell,mapOpt){ const raw=(cell==null?'':String(cell)); const map=mapOpt||ROOM_MAP; const exact=map && map[String(raw).trim().toLowerCase()]; if(exact && exact.mode==='replace') return (exact.value!=null?String(exact.value):''); return genericFindReplace(raw,map); }
     function canonicalizeRoomValue(cell){
@@ -322,3 +321,465 @@
     function autoFitWidths(ws, columns){ columns.forEach(colIdx=>{ const col=ws.getColumn(colIdx); let max=0; col.eachCell({ includeEmpty:true }, (cell)=>{ const v=(cell.value==null?'':String(cell.value)); max=Math.max(max, v.length); }); max=Math.max(max, 10); max=Math.min(max+2, 60); col.width=max; col.alignment={ wrapText:false }; }); }
     function ownerMappingIsActive(){ if(OWNER_MAP_ENABLED) return true; try{ return Object.values(collectOwnerMap()).some(cfg=>cfg && cfg.mode==='replace'); }catch(_){ return false; } }
     function roomMappingIsActive(){ if(ROOM_MAP_ENABLED) return true; try{ return Object.values(collectRoomMap()).some(cfg=>cfg && cfg.mode==='replace'); }catch(_){ return false; } }
+
+    function exportFile(){ try{
+      if(!customer.rows.length){ log('danger','No data rows found to export.'); return; }
+      const mappingRows=Array.from(document.querySelectorAll('#mappingRows .mapping-row'));
+      try{ if(STATUS_MAP_ENABLED){ STATUS_MAP=Object.assign({}, STATUS_MAP, collectStatusMap()); } }catch(_){ }
+      try{ OWNER_MAP=Object.assign({}, collectOwnerMap()); }catch(_){ }
+      try{ ROOM_MAP=Object.assign({}, collectRoomMap()); }catch(_){ }
+      function headerKeyFromLabel(el){ if(el && el.firstChild && el.firstChild.nodeType===Node.TEXT_NODE){ return el.firstChild.nodeValue.trim(); } return (el.textContent||'').replace('required','').trim(); }
+      const used=new Set(); mappingRows.forEach(row=>{ const sel=row.children[1]; if(sel&&sel.value) used.add(sel.value);});
+      const append=$('appendExtras')?.checked; const extras=append?customer.headers.filter(h=>h && !used.has(h)):[].sort((a,b)=>a.localeCompare(b));
+      const headersOut=[...master.headers, ...extras];
+      const outRows=[];
+      const applyOwnerMap = ownerMappingIsActive();
+      const applyRoomMap = roomMappingIsActive();
+      for(const srcRow of customer.rows){
+        const out={};
+        mappingRows.forEach(row=>{
+          const labelEl=row.children[0];
+          const sel=row.children[1];
+          const transform=row.children[2];
+          const constant=row.children[3];
+          const key=headerKeyFromLabel(labelEl);
+          let value='';
+          if(sel&&sel.value) value=srcRow[sel.value];
+          if(FALLBACK_DEFAULT_COLUMNS.has(key)){
+            if((value===''||value==null) && constant && constant.value) value=constant.value;
+          }
+          value=applyTransform(value, transform?transform.value:'none');
+          if(key==='room'){
+            value = applyRoomMap ? canonicalizeRoomValue(value) : value;
+          }
+          if(key==='status'){
+            if(STATUS_MAP_ENABLED) value=canonicalizeStatus(value);
+          }
+          if(key==='owner'){
+            value = applyOwnerMap ? canonicalizeOwner(value, OWNER_MAP) : value;
+          }
+          out[key]=value;
+        });
+        extras.forEach(h=>{ out[h]=srcRow[h]; });
+        outRows.push(out);
+      }
+      const sheetName=$('sheetName').value.trim()||master.sheetName||'Events';
+      const fmt=$('exportFormat').value;
+      let fname=$('fileName').value.trim()||`master_output.${fmt}`; fname=fname.replace(/\s+/g,'_');
+      if(fmt==='xlsx' && window.ExcelJS){
+        const wb=new ExcelJS.Workbook();
+        const ws=wb.addWorksheet(sheetName);
+        const headerRow=ws.addRow(headersOut);
+        headerRow.eachCell((cell,i)=>{ const key=headersOut[i-1]; let argb=null; if(RED_HEADERS.has(key)) argb='FFFF0000'; else if(YELLOW_HEADERS.has(key)) argb='FFFFFF00'; else if(extras.includes(key)) argb='FF90EE90'; if(argb){ cell.fill={type:'pattern',pattern:'solid',fgColor:{argb}}; cell.font={color:{argb:'FF000000'},bold:true}; }});
+        for(const row of outRows){ ws.addRow(headersOut.map(h=>row[h])); }
+        try{
+          if($('includeRoomsSheet')?.checked){
+            const srcRooms=computeRoomsFromCurrentMapping();
+            const mappedRooms = roomMappingIsActive() ? uniqueCaseInsensitive(srcRooms.map(r=>canonicalizeRoomCell(r, ROOM_MAP))).sort((a,b)=>a.localeCompare(b)) : srcRooms;
+            const statusesRaw=computeStatusesFromCurrentMapping();
+            const statuses=STATUS_MAP_ENABLED?uniqueCaseInsensitive(statusesRaw.map(canonicalizeStatus)).sort((a,b)=>a.localeCompare(b)):statusesRaw;
+            const ownersRaw=computeOwnersFromCurrentMapping();
+            const owners = ownerMappingIsActive()? uniqueCaseInsensitive(ownersRaw.map(o=>canonicalizeOwner(o, OWNER_MAP))).sort((a,b)=>a.localeCompare(b)) : ownersRaw;
+            if(mappedRooms.length||statuses.length||extras.length||owners.length){
+              const rs=wb.addWorksheet('Lists');
+
+// UPDATED headers:
+//  A: room (exported)
+//  B: in TS (user input list for rooms)
+//  C: status
+//  D: (spacer)
+//  E: appended_headers
+//  F: (spacer)
+//  G: owners (exported)
+//  H: owners in TS (user input for owners)
+//  I: unmatched_rooms (A not in any B)
+//  J: unmatched_owners (G not in any H)
+const listHeaders=['room','room in TS','', 'owners','owners in TS','', 'status','', 'unmatched_rooms','unmatched_owners','unmatched_status','appended_headers'];
+const hr=rs.addRow(listHeaders);
+hr.font={bold:true};
+hr.eachCell(c=>{ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFFF00'}}; c.font={color:{argb:'FF000000'},bold:true}; });
+// Light green on I,J,K,L headers
+try {
+  ['I1','J1','K1','L1'].forEach(addr=>{ const cell=rs.getCell(addr); cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFCCFFCC'}}; cell.font={color:{argb:'FF000000'},bold:true}; });
+}catch(_){}
+
+
+try{ rs.getCell(1,7).note = 'Valid statuses: Prospect, Tentative, Definite, Closed, Lost. Column K flags anything outside this set.'; }catch(_){}
+// Notes on headers B1 and H1
+
+try{ rs.getCell(1,2).note = 'Paste or type your room list here. If a value in column B matches a room in column A, that room will be un-reported in column I.'; }catch(_){}
+try{ rs.getCell(1,5).note = 'Paste or type your owners list here (column E). If it matches an owner in column D, that owner will be un-reported in column J.'; }catch(_){}
+
+// Data validation input messages on room/owner user columns
+try{
+  rs.dataValidations.add('B2:B1048576', {
+    type: 'textLength',
+    operator: 'greaterThanOrEqual',
+    showInputMessage: true,
+    allowBlank: true,
+    formulae: [0],
+    promptTitle: 'Rooms in TS',
+    prompt: 'Paste or type rooms here. Matches will be un-reported.'
+  });
+  rs.dataValidations.add('E2:E1048576', {
+    type: 'textLength',
+    operator: 'greaterThanOrEqual',
+    showInputMessage: true,
+    allowBlank: true,
+    formulae: [0],
+    promptTitle: 'Owners in TS',
+    prompt: 'Paste or type owners here. Matches will be un-reported.'
+  });
+  rs.dataValidations.add('G2:G1048576', {
+    type: 'list',
+    allowBlank: true,
+    showInputMessage: true,
+    formulae: ['"Prospect,Tentative,Definite,Closed,Lost"'],
+    promptTitle: 'Valid Statuses',
+    prompt: 'Choose one of: Prospect, Tentative, Definite, Closed, Lost.'
+  });
+
+}catch(_){}
+
+// Calculate max rows
+const maxRows=Math.max(mappedRooms.length,statuses.length,extras.length,owners.length);
+
+// Write rows: room, status, appended headers, owners; blanks for in-TS columns
+for(let i=0;i<maxRows;i++){
+  const r=rs.getRow(i+2);
+
+  // A: exported room
+  if(mappedRooms[i]) r.getCell(1).value=mappedRooms[i];
+
+  // C: status
+  if(statuses[i]) r.getCell(7).value=statuses[i];
+
+  // E: appended_headers
+  if(extras[i]) r.getCell(12).value=extras[i];
+
+  // G: owners (exported)
+  if(owners[i]) r.getCell(4).value=owners[i];
+
+  // I: unmatched_rooms -> IF(A2="","",IF(COUNTIF($B:$B,A2)>0,"",A2))
+  const rowIdx=i+2;
+  r.getCell(9).value={ formula: `IF(A${rowIdx}="","",IF(COUNTIF($B:$B,A${rowIdx})>0,"",A${rowIdx}))` };
+
+  // J: unmatched_owners -> IF(G2="","",IF(COUNTIF($H:$H,G2)>0,"",G2))
+  r.getCell(10).value={ formula: `IF(D${rowIdx}="","",IF(COUNTIF($E:$E,D${rowIdx})>0,"",D${rowIdx}))` };
+  // K: unmatched_status -> IF(C2="","",IF(ISNUMBER(MATCH(C2,{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",C2))
+  r.getCell(11).value={ formula: `IF(G${rowIdx}="","",IF(ISNUMBER(MATCH(G${rowIdx},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G${rowIdx}))` };
+
+
+  if(r.commit) r.commit();
+}
+
+// Auto-fit relevant columns including new inputs and unmatched columns
+autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
+            }
+          }
+        }catch(_){ }
+        wb.xlsx.writeBuffer().then(buf=>{
+          if(!/\.xlsx$/i.test(fname)) fname=fname.replace(/\.[^/.]+$/, '')+'.xlsx';
+          const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+          const link=document.createElement('a'); link.href=URL.createObjectURL(blob); link.download=fname; link.click(); URL.revokeObjectURL(link.href);
+          log('success',`Exported ${outRows.length} rows to ${fname}`);
+        }).catch(err=>log('danger','ExcelJS export error: '+(err.message||String(err))));
+      } else if(fmt==='xlsx'){
+        const wb=XLSX.utils.book_new();
+        const ws=XLSX.utils.json_to_sheet(outRows,{header:headersOut,skipHeader:false});
+        XLSX.utils.sheet_add_aoa(ws,[headersOut],{origin:'A1'});
+        XLSX.utils.book_append_sheet(wb,ws,sheetName);
+        if(!/\.xlsx$/i.test(fname)) fname=fname.replace(/\.[^/.]+$/, '')+'.xlsx';
+        XLSX.writeFile(wb,fname,{bookType:'xlsx'});
+        log('success',`Exported ${outRows.length} rows to ${fname}`);
+      } else {
+        const csvHeader=headersOut.join(',');
+        const csvRows=outRows.map(r=> headersOut.map(h=>{ const v=r[h]==null?'':String(r[h]); if(/[",\n]/.test(v)) return '"'+v.replace(/\"/g,'\"\"')+'"'; return v; }).join(','));
+        const csv=[csvHeader,...csvRows].join('\n');
+        if(!/\.csv$/i.test(fname)) fname=fname.replace(/\.[^/.]+$/, '')+'.csv';
+        const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+        const link=document.createElement('a'); link.href=URL.createObjectURL(blob); link.download=fname; link.click(); URL.revokeObjectURL(link.href);
+        log('success',`Exported ${outRows.length} rows to ${fname}`);
+      }
+    } catch(err){ log('danger','Export error: '+(err.message||String(err))); console.error(err); } }
+
+    // ===== Mapping persistence =====
+    const MAP_NS='pgmi:map:';
+    function currentMapKey(){ return MAP_NS+(customer.sourceKey||'unknown'); }
+    function collectMapping(){ const mapping={}; document.querySelectorAll('#mappingRows .mapping-row').forEach(row=>{ const master=row.children[0].firstChild && row.children[0].firstChild.nodeType===Node.TEXT_NODE ? row.children[0].firstChild.nodeValue.trim() : row.children[0].textContent.replace('required','').trim(); const sel=row.children[1].value||''; const tr=row.children[2].value||'none'; const def=row.children[3].disabled?undefined:row.children[3].value; mapping[master]={source:sel,transform:tr,def}; }); return mapping; }
+    function applyMapping(mapping){ if(!mapping) return; document.querySelectorAll('#mappingRows .mapping-row').forEach(row=>{ const master=row.children[0].firstChild && row.children[0].firstChild.nodeType===Node.TEXT_NODE ? row.children[0].firstChild.nodeValue.trim() : row.children[0].textContent.replace('required','').trim(); const cfg=mapping[master]; if(!cfg) return; const sel=row.children[1]; const tr=row.children[2]; const def=row.children[3]; if(sel && cfg.source && Array.from(sel.options).some(o=>o.value===cfg.source)) sel.value=cfg.source; if(tr && cfg.transform) tr.value=cfg.transform; if(def && !def.disabled && typeof cfg.def==='string') def.value=cfg.def; }); updateRoomsPreview(); syncSourceOptions(); }
+    function saveMapping(){ try{ const data=JSON.stringify(collectMapping()); localStorage.setItem(currentMapKey(), data); toast('Mapping saved'); }catch(e){ toast('Failed to save mapping','error'); } }
+    function loadMapping(){ try{ const data=localStorage.getItem(currentMapKey()); if(!data){ toast('No saved mapping for this file','warn'); return;} const mapping=JSON.parse(data); applyMapping(mapping); toast('Mapping loaded'); }catch(e){ toast('Failed to load mapping','error'); } }
+    function autoLoadMapping(){ try{ const data=localStorage.getItem(currentMapKey()); if(!data) return; const mapping=JSON.parse(data); applyMapping(mapping); }catch(_){} }
+
+    // ===== UI wiring =====
+    function pill(t){ const s=document.createElement('span'); s.className='pill'; s.textContent=t; return s; }
+    function updateUIAfterLoad(){ const btn=$('togglePreview'); if(btn){ btn.disabled=false; btn.onclick=()=>{ const p=$('preview'); const isOpen=!!(p && p.style.display!=='none'); if(p) p.style.display=isOpen?'none':'block'; btn.textContent=isOpen?'Show Preview':'Hide Preview'; }; const p0=$('preview'); btn.textContent= (p0&&p0.style.display!=='none')?'Hide Preview':'Show Preview'; } renderPreview(); buildMappingUI(); updateRoomsPreview(); initStatusMappingSection(); initRoomMappingSection(); initOwnerMappingSection(); const meta=$('customerMeta'); if(meta){ meta.style.display='flex'; meta.innerHTML=''; } }
+
+    function handleFile(f){ if(!window.XLSX){ log('danger','Excel parser not loaded.'); return; } const reader=new FileReader(); reader.onload=()=>{ try{ const data=new Uint8Array(reader.result); const wb=XLSX.read(data,{type:'array'}); const ws=wb.Sheets[wb.SheetNames[0]]; const rows=XLSX.utils.sheet_to_json(ws,{defval:'',raw:false}); let headers=getHeadersFromSheet(ws); headers=dedupeHeaders(headers); customer.headers=(headers||[]).map(h=>String(h||'').trim()); customer.rows=rows||[]; customer.sourceKey=`${f.name}|${wb.SheetNames[0]}|${customer.headers.join(',')}`.slice(0,500); const meta=$('customerMeta'); meta.style.display='flex'; meta.innerHTML=''; meta.appendChild(pill(`File: ${f.name}`)); meta.appendChild(pill(`Sheet: ${wb.SheetNames[0]}`)); meta.appendChild(pill(`${customer.headers.length} columns`)); meta.appendChild(pill(`${customer.rows.length} rows`)); updateUIAfterLoad(); }catch(err){ log('danger','Failed to read file: '+(err&&err.message?err.message:String(err))); } }; reader.onerror=()=>log('danger','File read error'); reader.readAsArrayBuffer(f); }
+
+    function wireDnD(){
+      const drop=$('drop'); const input=$('customerFile'); const overlay=$('overlayPicker');
+      if(!drop||!input) return;
+      if(drop.dataset.wired==='1') return; 
+      drop.dataset.wired='1'; input.dataset.wired='1';
+
+      if(overlay){ overlay.addEventListener('change',e=>{ const f=e.target.files && e.target.files[0]; if(f) handleFile(f); try{ e.target.value=''; }catch(_){} }); }
+
+      let _pickLock=false;
+      const triggerPick=(ev)=>{ ev?.preventDefault?.(); if(_pickLock) return; _pickLock=true; try{ input.click(); }catch(e){ try{ input.focus(); input.click(); }catch(_){} } setTimeout(()=>{ _pickLock=false; }, 450); };
+      drop.addEventListener('click', triggerPick);
+      drop.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); triggerPick(e); }});
+      ['dragenter','dragover'].forEach(ev=> drop.addEventListener(ev,e=>{ e.preventDefault(); drop.classList.add('dragover'); }));
+      ['dragleave','drop'].forEach(ev=> drop.addEventListener(ev,e=>{ e.preventDefault(); drop.classList.remove('dragover'); }));
+      drop.addEventListener('drop',e=>{ const f=e.dataTransfer?.files?.[0]; if(!f) return; handleFile(f); });
+      input.addEventListener('change',e=>{ const f=e.target.files[0]; if(!f){ log('danger','No file selected.'); return;} handleFile(f); try{ e.target.value=''; }catch(_){} });
+
+      let _linking=false; const roomsInput=$('roomSeps'); const exportInput=$('roomSep');
+      if(roomsInput && exportInput){
+        roomsInput.addEventListener('input',()=>{ if(_linking) return; _linking=true; exportInput.value=roomsInput.value; _linking=false; updateRoomsPreview(); });
+        exportInput.addEventListener('input',()=>{ if(_linking) return; _linking=true; roomsInput.value=exportInput.value; _linking=false; updateRoomsPreview(); });
+      }
+      const mode=$('roomSepMode'); const repl=$('roomSepReplace');
+      if(mode && repl){ mode.addEventListener('change',()=>{ const isReplace=mode.value==='replace'; repl.disabled=!isReplace; }); }
+      $('refreshRooms')?.addEventListener('click', updateRoomsPreview);
+      $('copyRooms')?.addEventListener('click',()=>{ const rooms=computeRoomsFromCurrentMapping(); const text=rooms.join(NL); navigator.clipboard?.writeText(text).then(()=>toast(`Copied ${rooms.length} room(s)`)).catch(()=>toast('Failed to copy rooms','error')); });
+      $('exportBtn')?.addEventListener('click', exportFile);
+      $('saveMapping')?.addEventListener('click', saveMapping);
+      $('loadMapping')?.addEventListener('click', loadMapping);
+      const btn=$('togglePreview'); if(btn){ btn.disabled=true; btn.textContent='Show Preview'; }
+    }
+
+    // ===== Self-tests =====
+    (function runSelfTests(){
+      try{
+        const deepEq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+        const results=[]; const ok=(name,cond)=>results.push({name,pass:!!cond});
+        // Rooms
+        ok('splitRooms basic', deepEq(splitRooms('Main, PDR;Lane 1', ',;'), ['Main','PDR','Lane 1']));
+        ok('replaceRoomSeps semicolon', replaceRoomSeps('A/B/C','/',';')==='A;B;C');
+        ok('replaceRoomSeps empty repl', replaceRoomSeps('A/B','/','')==='AB');
+        // Owner replace – exact and substring (with regex escaping)
+        const tMap={ 'anaiah': {mode:'replace', value:'Anaiah Dontgoherenomo'}, ' jane doe ': {mode:'replace', value:'J. Doe'}, 'c++': {mode:'replace', value:'CPP'}, '[team]': {mode:'replace', value:'Squad'} };
+        ok('owner replace exact', canonicalizeOwner('Anaiah', tMap)==='Anaiah Dontgoherenomo');
+        ok('owner substring replace', canonicalizeOwner('Lead Owner: Anaiah', tMap)==='Lead Owner: Anaiah Dontgoherenomo');
+        ok('owner escaper pluses', canonicalizeOwner('C++ Lead', tMap)==='CPP Lead');
+        ok('owner escaper brackets', canonicalizeOwner('Alpha [Team] Bravo', tMap)==='Alpha Squad Bravo');
+        ok('owner multi occurrence', canonicalizeOwner('Anaiah + Anaiah', tMap)==='Anaiah Dontgoherenomo + Anaiah Dontgoherenomo');
+        // Room replace tests
+        const rMap={ 'pdr': {mode:'replace', value:'Private Dining'}, 'ballroom a': {mode:'replace', value:'Ballroom Alpha'}, 'arcade mt': {mode:'replace', value:'Arcade'}, 'arcade mg': {mode:'replace', value:'Arcade'} };
+        ok('room replace exact', canonicalizeRoomCell('PDR', rMap)==='Private Dining');
+        ok('room substring replace', canonicalizeRoomCell('Main + PDR', rMap)==='Main + Private Dining');
+        ok('room multiple tokens', canonicalizeRoomCell('PDR / Ballroom A', rMap)==='Private Dining / Ballroom Alpha');
+        // De-dup after mapping
+        ROOM_MAP = rMap;
+        $('roomSepMode') && ($('roomSepMode').value='replace');
+        $('roomSepReplace') && ($('roomSepReplace').value=', ');
+        ok('room dedupe after mapping (replace mode)', canonicalizeRoomValue('Arcade MT/Arcade MG/Arcade MG')==='Arcade');
+        $('roomSepMode') && ($('roomSepMode').value='leave');
+        $('roomSep') && ($('roomSep').value=',');
+        ok('room dedupe after mapping (leave mode)', canonicalizeRoomValue('Arcade MT,Arcade MG,Arcade MT')==='Arcade');
+        ok('room dedupe with pipe sep', canonicalizeRoomValue('Arcade|Arcade|Arcade')==='Arcade');
+        // Status guess sanity
+        ok('status guess tentative', guessCanonicalStatus('pending')==='Tentative');
+        const failed=results.filter(r=>!r.pass);
+        if(failed.length){ console.warn('Self-tests failed:', failed); toast(`${failed.length} self-test(s) failed`,'error'); }
+        else { console.log('%cSelf-tests passed','color:#32d583'); }
+      }catch(err){ console.error('Self-tests error',err); }
+    })();
+
+    // Init
+    document.addEventListener('DOMContentLoaded',()=>{ try{ wireDnD(); }catch(_){} });
+  </script>
+<script async defer src="https://apis.google.com/js/api.js"></script>
+<script async defer src="https://accounts.google.com/gsi/client"></script>
+
+<script>
+(function(){
+  const CLIENT_ID="7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com";
+  const TEMPLATE_ID="1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
+  const SCOPES="https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets";
+
+  document.addEventListener("DOMContentLoaded",()=>{
+    const b=document.getElementById("exportToSheetsBtn");
+    if (b) b.addEventListener("click", exportToSheets);
+  });
+
+  async function gapiBoot(){
+    await new Promise((res,rej)=>{ gapi.load("client", async ()=>{ try{ await gapi.client.init({}); res(); }catch(e){ rej(e); } }); });
+    await gapi.client.load("https://www.googleapis.com/discovery/v1/apis/drive/v3/rest");
+    await gapi.client.load("https://sheets.googleapis.com/$discovery/rest?version=v4");
+  }
+  let tokenClient=null;
+  async function getToken(){ if(!tokenClient) tokenClient=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID, scope:SCOPES, use_fedcm_for_prompt:true, callback:()=>{}});
+    return new Promise((resolve,reject)=>{ tokenClient.callback=(r)=>r&&r.access_token?resolve(r.access_token):reject(new Error(r?.error||"no token")); tokenClient.requestAccessToken({prompt:"consent"}); });
+  }
+  async function driveCopy(id,name){ const r=await gapi.client.drive.files.copy({fileId:id,supportsAllDrives:true,fields:"id",resource:{name}}); return r.result.id; }
+  async function waitReady(id){ for(let i=1;i<=10;i++){ try{ const r=await gapi.client.sheets.spreadsheets.get({spreadsheetId:id,fields:"spreadsheetId"}); if(r?.result?.spreadsheetId) return; }catch(_){}
+      await new Promise(r=>setTimeout(r, 400*i)); } throw new Error("Sheet not ready after copy."); }
+  async function ensureSheet(id,title){ try{ await gapi.client.sheets.spreadsheets.values.clear({spreadsheetId:id,range:`${title}!A1:ZZ99999`}); } catch(_) { await gapi.client.sheets.spreadsheets.batchUpdate({spreadsheetId:id, resource:{requests:[{addSheet:{properties:{title}}}]}}); } }
+  async function writeRAW(id,title,values){ await gapi.client.sheets.spreadsheets.values.update({spreadsheetId:id,range:`${title}!A1`,valueInputOption:"RAW",resource:{majorDimension:"ROWS",values}}); }
+  async function writeUSER(id,title,values){ await gapi.client.sheets.spreadsheets.values.update({spreadsheetId:id,range:`${title}!A1`,valueInputOption:"USER_ENTERED",resource:{majorDimension:"ROWS",values}}); }
+
+  function norm(s){ return String(s||'').toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim(); }
+
+  function getData(){
+    // 1) Prefer the parsed Excel data (customer.headers / customer.rows)
+    try {
+      if (typeof customer!=='undefined' && Array.isArray(customer.rows) && customer.rows.length){
+        if (Array.isArray(customer.headers) && customer.headers.length){
+          return { headersOut: customer.headers.slice(), outRows: customer.rows.slice(), source: 'customer' };
+        }
+      }
+    } catch(_){}
+    // 2) Fallback: scrape visible table (DOM)
+    const t=document.querySelector('table'); if(!t) return null;
+    const thead=t.querySelector('thead'), tbody=t.querySelector('tbody');
+    let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll('th,td')).map(x=>x.textContent.trim());
+    const rowEls = tbody ? Array.from(tbody.querySelectorAll('tr')) : Array.from(t.querySelectorAll('tr'));
+    const bodyRows = rowEls.map(tr=>Array.from(tr.querySelectorAll('td,th')).map(td=>td.textContent.trim()));
+    if (!headers.length && bodyRows.length){ headers = bodyRows.shift(); }
+    const seen={}; const H=headers.map(h=>{ let k=(h||'').trim()||'Column', b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
+    const outRows = bodyRows.filter(r=>r.some(v=>v!=='')).map(r=>{ const o={}; for(let i=0;i<H.length;i++) o[H[i]]=(r[i]??'').trim(); return o; });
+    return { headersOut:H, outRows, source:'dom' };
+  }
+
+  function computeLists(headersOut, outRows){
+    const owners=new Set(), rooms=new Set(), statuses=new Set();
+    const lc=headersOut.map(h=>norm(h));
+    const find=(names)=>{ for(const n of names){ const i=lc.indexOf(norm(n)); if(i!==-1) return i; } for(let i=0;i<lc.length;i++){ if(names.some(n=>lc[i].includes(norm(n)))) return i; } return -1; };
+    const iRoom=find(['room']);
+    let iOwner=find(['owner','owner name','owner full','primary contact','contact']);
+    const iOwnerFirst=find(['owner first','first name']);
+    const iOwnerLast=find(['owner last','last name']);
+    const iStatus=find(['event status','status']);
+    for(const r of outRows){
+      const vals=headersOut.map(h=>r[h]);
+      if(iRoom!==-1 && vals[iRoom]) String(vals[iRoom]).split(/[,/;|:]/).map(s=>s.trim()).filter(Boolean).forEach(x=>rooms.add(x));
+      let ownerVal='';
+      if(iOwner!==-1 && vals[iOwner]) ownerVal=String(vals[iOwner]).trim();
+      else if(iOwnerFirst!==-1||iOwnerLast!==-1) ownerVal=[vals[iOwnerFirst]||'', vals[iOwnerLast]||''].join(' ').trim();
+      if(ownerVal) owners.add(ownerVal);
+      if(iStatus!==-1 && vals[iStatus]) statuses.add(String(vals[iStatus]).trim());
+    }
+    const CANON=new Set(["Prospect","Tentative","Definite","Closed","Lost"]);
+    const unmatched=[...statuses].filter(s=>!CANON.has(s));
+    return { rooms:[...rooms], owners:[...owners], statuses:unmatched, nonMatched:[] };
+  }
+
+  async 
+function exportToSheets(){
+  try{
+    if (!window.__lastXlsxBlob) {
+      alert("Please run your normal Excel export first, then click Export to Google Sheet.");
+      return;
+    }
+    return (async function(){
+      await new Promise((resolve,reject)=>{ gapi.load("client", async ()=>{ try{ await gapi.client.init({}); resolve(); }catch(e){ reject(e); } }); });
+      await gapi.client.load("https://www.googleapis.com/discovery/v1/apis/drive/v3/rest");
+      await gapi.client.load("https://sheets.googleapis.com/$discovery/rest?version=v4");
+
+      const tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: "7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com",
+        scope: "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets",
+        use_fedcm_for_prompt: true,
+        callback: ()=>{}
+      });
+      const accessToken = await new Promise((resolve,reject)=>{
+        tokenClient.callback = (r)=> r && r.access_token ? resolve(r.access_token) : reject(new Error(r?.error||"No token"));
+        tokenClient.requestAccessToken({prompt:"consent"});
+      });
+      gapi.client.setToken({access_token: accessToken});
+
+      const TEMPLATE_ID = "1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
+      const fileName = ((document.getElementById("fileName")?.value || "master_output").trim()||"master_output").replace(/\s+/g,"_") + " (Google Sheet)";
+      const copyRes = await gapi.client.drive.files.copy({
+        fileId: TEMPLATE_ID, supportsAllDrives: true, fields: "id", resource: { name: fileName }
+      });
+      const destSpreadsheetId = copyRes.result.id;
+
+      async function waitReady(id){
+        for (let i=1;i<=10;i++){
+          try { const r = await gapi.client.sheets.spreadsheets.get({ spreadsheetId:id, fields:"spreadsheetId" }); if (r?.result?.spreadsheetId) return; }
+          catch(_){}
+          await new Promise(r=>setTimeout(r, 300*i));
+        }
+        throw new Error("Sheet not ready.");
+      }
+      await waitReady(destSpreadsheetId);
+
+      async function uploadAndConvertXlsx(blob, name){
+        const metadata = new Blob([JSON.stringify({ name: name + " (Converted)", mimeType: "application/vnd.google-apps.spreadsheet" })], { type: "application/json" });
+        const boundary = "-------314159265358979323846";
+        const delimiter = "\r\n--" + boundary + "\r\n";
+        const closeDelim = "\r\n--" + boundary + "--";
+        const body = new Blob([
+          delimiter, 'Content-Type: application/json; charset=UTF-8\r\n\r\n', metadata,
+          delimiter, 'Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n', blob, closeDelim
+        ], { type: "multipart/related; boundary=" + boundary });
+
+        const res = await gapi.client.request({
+          path: "/upload/drive/v3/files?uploadType=multipart&fields=id",
+          method: "POST",
+          body,
+          headers: { "Content-Type": "multipart/related; boundary=" + boundary }
+        });
+        return res.result.id;
+      }
+      const sourceSpreadsheetId = await uploadAndConvertXlsx(window.__lastXlsxBlob, fileName);
+
+      async function getSheetList(id){
+        const res = await gapi.client.sheets.spreadsheets.get({ spreadsheetId:id, fields:"sheets(properties(sheetId,title,index))" });
+        return (res.result.sheets||[]).map(s=>s.properties);
+      }
+      const srcSheets = await getSheetList(sourceSpreadsheetId);
+
+      async function copySheetTo(srcSheetId, dstId){
+        const r = await gapi.client.sheets.spreadsheets.sheets.copyTo({
+          spreadsheetId: sourceSpreadsheetId,
+          sheetId: srcSheetId,
+          resource: { destinationSpreadsheetId: dstId }
+        });
+        return r.result;
+      }
+      const addedSheets = [];
+      for (const s of srcSheets){ addedSheets.push(await copySheetTo(s.sheetId, destSpreadsheetId)); }
+
+      const existing = await getSheetList(destSpreadsheetId);
+      const toDelete = existing.filter(p => !addedSheets.some(a => a.sheetId === p.sheetId));
+      if (toDelete.length){
+        await gapi.client.sheets.spreadsheets.batchUpdate({
+          spreadsheetId: destSpreadsheetId,
+          resource: { requests: toDelete.map(p => ({ deleteSheet: { sheetId: p.sheetId } })) }
+        });
+      }
+
+      window.open(`https://docs.google.com/spreadsheets/d/${destSpreadsheetId}/edit`, "_blank");
+    })();
+  }catch(e){
+    console.error(e);
+    alert("Export failed: " + (e?.result?.error?.message || e.message || String(e)));
+  }
+}
+
+})();
+</script>
+
+
+<script>
+(function(){
+  const _origSaveAs = window.saveAs;
+  window.saveAs = function(blob, name, opts){
+    try{
+      if (blob && blob.type && blob.type.indexOf("spreadsheetml") !== -1) {
+        window.__lastXlsxBlob = blob;
+      }
+    }catch(_){}
+    return _origSaveAs ? _origSaveAs(blob, name, opts) : null;
+  };
+})();
+</script>
+
+<script>window.exportToSheets = exportToSheets;</script>
+</body>
+</html>
