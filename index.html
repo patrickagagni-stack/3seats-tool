@@ -1,216 +1,811 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>3seats — Fresh Export (Clean Start)</title>
+  <title>Event Data Import Tool</title>
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js">
+
+
+// === Added: Lossless matrix reader for Sheets export (preserves columns beyond Z) ===
+function readWorksheetMatrix(ws) {
+  // Produce a 2D array preserving blanks, types, and far-right columns
+  let rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false });
+  const width = rows.reduce((m, r) => Math.max(m, r.length), 0);
+  rows = rows.map(r => (r.length === width ? r : [...r, ...Array(width - r.length).fill("")]));
+  if (rows.length === 0) rows = [[]];
+  rows[0] = rows[0].map((h, i) => (String(h || "").trim() ? String(h) : `Column_${i + 1}`));
+  return rows;
+}
+
+
+</script>
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
   <style>
-    :root { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
-    body { margin:0; padding:32px; background:#fafafa; color:#111; }
-    .wrap { max-width: 900px; margin: 0 auto; }
-    h1 { margin:0 0 8px; font-size:22px; }
-    .card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:16px 18px; margin:16px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    input[type="text"]{ padding:8px 10px; border:1px solid #d1d5db; border-radius:8px; min-width:280px;}
-    button{ appearance:none; border:0; background:#111827; color:#fff; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:600;}
-    .muted{ color:#6b7280; font-size:13px;}
-    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .ok{ color:#065f46; }
-    .warn{ color:#92400e; }
-    .small{ font-size:12px; }
-    .divider{ height:1px; background:#eee; margin:12px 0; }
-    .hidden{ display:none; }
-    .log{ white-space:pre-wrap; font-size:12px; background:#0b1021; color:#c7d2fe; padding:10px; border-radius:8px; }
+    :root{ --bg:#0b1020; --panel:#141a2f; --muted:#b7c4ff; --text:#f5f8ff; --warn:#ffb020; --err:#ff6b6b; --ok:#32d583; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text)}
+    header{padding:24px 20px;border-bottom:1px solid #1f2745;background:linear-gradient(180deg,#0e1530,#0b1020)}
+    h1{margin:0;font-size:20px}
+    main{padding:20px;max-width:1200px;margin:0 auto}
+    .grid{display:grid;gap:16px}
+    .card{background:var(--panel);border:1px solid #1f2745;border-radius:16px;box-shadow:0 6px 30px #0006}
+    .card h2{margin:0;padding:14px 16px;font-size:16px;border-bottom:1px solid #1f2745;color:#dbe3ff}
+    .card .content{padding:16px}
+    label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px 2px}
+    input[type="file"], select, input[type="text"]{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #243058;background:#0e1429;color:#fff}
+    select option{background:#0e1429;color:#fff}
+    .btn{display:inline-flex;gap:8px;align-items:center;padding:10px 14px;border-radius:12px;border:1px solid #2b3761;background:#162048;color:#f5f8ff;cursor:pointer;font-weight:600}
+    .btn.primary{background:linear-gradient(180deg,#3957d8,#2d47b5)}
+    .row{display:flex;gap:12px;align-items:center}
+    .row.wrap{flex-wrap:wrap}
+    .pill{padding:6px 10px;border:1px solid #29335a;border-radius:999px;color:#dbe3ff;background:#0f1735;font-size:12px}
+    .pill.required{background:#0f1735;border-color:#2b3a7a;color:#ff9090;font-size:10px;padding:2px 6px;margin-left:6px}
+    .pill.offsite{background:#2a210e;border-color:#8a6b00;color:#ffd78a;font-size:10px;padding:2px 6px;margin-left:6px}
+    .hint{font-size:11px;color:#aab8f5}
+    .notice{border-left:4px solid var(--warn);background:#2a210e;padding:10px 12px;border-radius:8px;color:#ffd78a}
+    .danger{border-left:4px solid var(--err);background:#2a1414;padding:10px 12px;border-radius:8px;color:#ffb3b3}
+    table{width:100%;border-collapse:separate;border-spacing:0}
+    th,td{padding:10px 12px;border-bottom:1px solid #202a55}
+    th{position:sticky;top:0;background:#121a34;text-align:left;font-size:12px;color:#c8d4ff}
+    .mapping-row{display:grid;grid-template-columns:260px 1fr 220px 220px;gap:10px;align-items:center}
+    .disabled-cell{opacity:.5;pointer-events:none}
+    .rooms-wrap{display:flex;flex-wrap:wrap;gap:8px}
+    .room-chip{padding:6px 10px;border:1px solid #29335a;border-radius:999px;background:#0f1735;color:#f5f8ff;font-size:12px}
+    .dropzone{border:2px dashed #2b3761;border-radius:12px;padding:20px;text-align:center;background:#0f1735;color:#c8d4ff;position:relative}
+    .dropzone.dragover{background:#122048}
+    .toast{position:fixed;right:16px;bottom:16px;padding:10px 12px;border-radius:10px;background:#122048;border:1px solid #2b3761;color:#e7ecff;box-shadow:0 6px 30px #000a;display:none}
+    .visually-hidden{position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none}
   </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>3seats — Fresh Export (Clean Start)</h1>
-  <div class="card">
-    <p class="muted">This clean version ignores previous wiring and does one job reliably:<br>
-    <b>Pick an Excel (.xlsx) → Convert to Google Sheets → Copy into your template → Open it.</b><br>
-    It preserves <i>all</i> columns and tabs because Google does the conversion.</p>
-  </div>
+  <header>
+    <h1>Event Data Import Tool</h1>
+    <div class="hint" style="margin-top:6px">Upload/Preview, Field Mapping, Rooms, optional Status, Room & Owner mapping, and Export.</div>
+    <div class="hint" style="margin-top:4px">Last updated: October 2, 2025</div>
+  </header>
 
-  <div class="card">
-    <div class="row">
-      <div>
-        <label class="small">Output base name</label><br/>
-        <input id="fileName" type="text" placeholder="master_output" />
+  <main class="grid">
+    <section class="card"><h2>1) Upload Customer Data (Excel/CSV)</h2><div class="content grid" style="gap:10px">
+      <div id="drop" class="dropzone" tabindex="0" role="button" aria-label="Upload customer file">Drop file here or click to browse
+        <input id="overlayPicker" type="file" accept=".xlsx,.xls,.csv" aria-hidden="true" style="position:absolute;inset:0;opacity:0;cursor:pointer" />
       </div>
-      <div>
-        <label class="small">&nbsp;</label><br/>
-        <button id="btnExport">Export to Google Sheet</button>
+      <input id="customerFile" type="file" accept=".xlsx,.xls,.csv" class="visually-hidden" />
+      <div class="row wrap" id="customerMeta" style="display:none;gap:8px"></div>
+      <div class="row wrap" style="gap:8px;margin-top:8px"><span class="pill">Preview rows: <span id="previewCount">0</span></span><button class="btn" id="togglePreview" disabled>Show Preview</button></div>
+      <div id="preview" style="display:none;margin-top:10px;max-height:300px;overflow:auto"><table id="previewTable"></table></div>
+    </div></section>
+
+    <section class="card"><h2>2) Map Fields</h2><div class="content">
+      <div class="notice" id="mappingNotice">Columns marked <span class="pill required">required</span> allow a default that is used only if the source is blank. Off-site fields are marked with <span class="pill offsite">Off-Site</span>.</div>
+      <div id="mappingArea" style="display:none" class="grid">
+        <div class="mapping-row" style="font-size:12px;color:#8ea0dc;margin-bottom:4px"><div>Master Header</div><div>Source (Customer Field)</div><div>Format Conversions (As Needed)</div><div>Default / Constant</div></div>
+        <div id="mappingRows" class="grid" style="gap:8px"></div>
       </div>
-    </div>
-    <div class="divider"></div>
-    <div id="status" class="small muted">Idle</div>
-  </div>
-
-  <div class="card">
-    <details>
-      <summary class="muted">Advanced (Template & OAuth info)</summary>
-      <div class="small">
-        Template ID (fixed): <span class="mono">1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE</span><br/>
-        OAuth Client ID: <span class="mono">7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com</span>
+      <div class="row wrap" style="gap:8px;margin-top:10px">
+        <button class="btn" id="saveMapping" type="button">Save Mapping</button>
+        <button class="btn" id="loadMapping" type="button">Load Mapping</button>
       </div>
-    </details>
-  </div>
+    </div></section>
 
-  <div id="log" class="log hidden"></div>
-</div>
+    <section class="card"><h2>3) Rooms summary</h2><div class="content">
+      <div class="row wrap">
+        <span class="pill">Unique rooms: <span id="roomsCount">0</span></span>
+        <label class="rooms-input"><span class="hint">Room separator characters</span><input id="roomSeps" type="text" value=",/;|:" /></label>
+        <button class="btn" id="refreshRooms">Refresh</button>
+        <button class="btn" id="copyRooms">Copy list</button>
+      </div>
+      <div class="rooms-wrap" id="roomsList" style="margin-top:8px"></div>
+    </div></section>
 
-<!-- Google platform scripts -->
+    <section class="card"><h2>4) Status mapping</h2><div class="content">
+      <div class="notice">Optional. If disabled, statuses export unchanged.</div>
+      <div class="row wrap" style="gap:8px;margin-bottom:8px"><button class="btn" id="toggleStatusMap">Enable status mapping</button><span class="hint">Collapsed by default</span></div>
+      <div id="statusMapArea" style="display:none">
+        <div class="row wrap" style="gap:8px;align-items:flex-end;margin-bottom:10px">
+          <label style="min-width:260px">
+            <span class="hint">Default canonical status for all (optional)</span>
+            <select id="statusDefault">
+              <option value="">— No default —</option>
+              <option value="Prospect">Prospect</option>
+              <option value="Tentative">Tentative</option>
+              <option value="Definite">Definite</option>
+              <option value="Closed">Closed</option>
+              <option value="Lost">Lost</option>
+            </select>
+          </label>
+          <button class="btn" id="applyStatusDefaultAll" type="button">Apply default to all</button>
+        </div>
+        <div class="hint" style="margin-bottom:8px">Detected statuses (left) → Canonical (right)</div>
+        <div id="statusMapRows" class="grid" style="gap:8px"></div>
+        <div class="row wrap" style="gap:8px;margin-top:8px"><button class="btn" id="saveStatusMap">Save Status Mapping</button><button class="btn" id="loadStatusMap">Load Status Mapping</button></div>
+      </div>
+    </div></section>
+
+    <section class="card"><h2>5) Room mapping</h2><div class="content">
+      <div class="notice">Optional. If disabled, room values export unchanged.</div>
+      <div class="row wrap" style="gap:8px;margin-bottom:8px"><button class="btn" id="toggleRoomMap">Enable room mapping</button><span class="hint">Uses Excel-like Find & Replace</span></div>
+      <div id="roomMapArea" style="margin-top:10px; display:none">
+        <div class="hint" style="margin-bottom:8px">Detected rooms (left) → Action (right)</div>
+        <div id="roomMapRows" class="grid" style="gap:8px"></div>
+      </div>
+    </div></section>
+
+    <section class="card"><h2>6) Owner mapping</h2><div class="content">
+      <div class="notice">Optional. If disabled, owners export unchanged.</div>
+      <div class="row wrap" style="gap:8px;margin-bottom:8px"><button class="btn" id="toggleOwnerMap">Enable owner mapping</button><span class="hint">Collapsed by default</span></div>
+      <div id="ownerMapArea" style="margin-top:10px; display:none">
+        <div class="hint" style="margin-bottom:8px">Detected owners (left) → Action (right)</div>
+        <div id="ownerMapRows" class="grid" style="gap:8px"></div>
+      </div>
+    </div></section>
+
+    <section class="card"><h2>7) Export</h2><div class="content">
+      <div class="row wrap" style="gap:12px">
+        <label><span>Output Sheet Name</span><input id="sheetName" type="text" placeholder="Defaults to Events"/></label>
+        <label><span>File Name</span><input id="fileName" type="text" placeholder="master_output.xlsx"/></label>
+        <label><span>Room Separator <span class="hint">(in most cases should match section 3)</span></span><input id="roomSep" type="text" value=","/></label>
+        <label><span>Replace room separators</span>
+          <div class="row" style="gap:8px">
+            <select id="roomSepMode">
+              <option value="leave" selected>Leave as is</option>
+              <option value="replace">Replace with…</option>
+            </select>
+            <input id="roomSepReplace" type="text" value=", " placeholder=", " disabled />
+          </div>
+        </label>
+        <label><span>Export Format</span><select id="exportFormat"><option value="xlsx" selected>.xlsx (Excel)</option><option value="csv">.csv</option></select></label>
+        <label class="row" style="gap:8px"><input id="appendExtras" type="checkbox" checked/><span class="hint">Append unmatched customer columns</span></label>
+        <label class="row" style="gap:8px"><input id="includeRoomsSheet" type="checkbox" checked/><span class="hint">Include a separate "Lists" sheet</span></label>
+        <button class="btn primary" id="exportBtn" disabled>Generate</button>
+        <button class="btn" id="exportToSheetsBtn" type="button" title="Create a Google Sheet from the current preview/mapping" style="margin-left:8px;">Export to Google Sheet</button>
+      </div>
+      <div id="exportMsg" style="margin-top:10px"></div>
+    </div></section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    // ===== Constants & helpers =====
+    const NL='\n';
+    const MASTER_HEADERS=['name','date','start_time','end_time','status','contact_full_name','contact_first_name','contact_last_name','account','room','location','owner','event_style','delivery_instructions','offsite_address_street','offsite_address_street2','offsite_address_city','offsite_address_state','offsite_address_zip','offsite_address_country','offsite_address_full','created_at','setup_time','teardown_time','guest_count','guaranteed_guest_count','actual_amount','grand_total','deposit_amount','description','food_and_beverage_min','payment_type','event_type','lead_source','rental_fee','amount_due','price_per_person','lost_reason'];
+    const FALLBACK_DEFAULT_COLUMNS=new Set(['name','date','start_time','end_time','status','contact_full_name','contact_first_name','contact_last_name','account','room','location','owner','event_style']);
+    const PREFILLED_DEFAULTS={name:'Not Specified',date:'01/01/2020',start_time:'11:59 am',end_time:'11:59 pm',status:'tentative',contact_full_name:'Not Specified',contact_first_name:'Not',contact_last_name:'Specified',account:'TS Import',room:'TS Import',location:'Location',owner:'Owner',event_style:'On Premise'};
+    const RED_HEADERS=new Set(['name','date','start_time','end_time','status','contact_full_name','contact_first_name','contact_last_name','account','room','location','owner','event_style']);
+    const YELLOW_HEADERS=new Set(['delivery_instructions','offsite_address_street','offsite_address_street2','offsite_address_city','offsite_address_state','offsite_address_zip','offsite_address_country','offsite_address_full']);
+    const CANON_STATUSES=['Prospect','Tentative','Definite','Closed','Lost'];
+
+    let master={headers:MASTER_HEADERS,sheetName:'Events'};
+    let customer={headers:[],rows:[],sourceKey:''};
+    const $=id=>document.getElementById(id);
+    function toast(text,kind='info'){ const t=$('toast'); if(!t) return; t.textContent=text; t.style.display='block'; t.style.borderColor=kind==='error'?'#ff6b6b':(kind==='warn'?'#ffb020':'#2b3761'); setTimeout(()=>t.style.display='none',2200); }
+    function log(kind,msg){ const el=$('exportMsg'); if(!el) return; el.className=kind; el.textContent=msg; }
+
+    function dedupeHeaders(arr){ const seen=new Map(); return arr.map(h=>{ let base=(h||'').trim()||'Column'; let key=base.toLowerCase(); if(!seen.has(key)){ seen.set(key,1); return base; } const n=seen.get(key); seen.set(key,n+1); return base+'_'+(n+1); }); }
+    function getHeadersFromSheet(ws){ const range=ws['!ref']?XLSX.utils.decode_range(ws['!ref']):null; if(!range) return []; const headers=[]; const R=range.s.r; for(let C=range.s.c; C<=range.e.c; ++C){ const cell=ws[XLSX.utils.encode_cell({r:R,c:C})]; let hdr=cell?String(cell.v).trim():''; headers.push(hdr);} while(headers.length && !headers[headers.length-1]) headers.pop(); return headers; }
+    function norm(str){ let s=String(str||'').toLowerCase(); s=s.replace(/[_-]+/g,' ').trim().replace(/\s+/g,' '); return s; }
+    function squish(str){ return norm(str).replace(/\s+/g,''); }
+    function guessMatch(masterHdr,chs){ const t=norm(masterHdr), ts=squish(masterHdr); let hit=chs.find(h=>norm(h)===t)||chs.find(h=>squish(h)===ts)||chs.find(h=>squish(h).includes(ts)||ts.includes(squish(h))); return hit||''; }
+
+    function renderPreview(){ const table=$('previewTable'); if(!table) return; table.innerHTML=''; if(!customer.rows.length){ $('previewCount').textContent='0'; return;} const sample=customer.rows.slice(0,10); $('previewCount').textContent=String(customer.rows.length); const thead=document.createElement('thead'); const trh=document.createElement('tr'); customer.headers.forEach(h=>{ const th=document.createElement('th'); th.textContent=h; trh.appendChild(th); }); thead.appendChild(trh); table.appendChild(thead); const tbody=document.createElement('tbody'); for(const row of sample){ const tr=document.createElement('tr'); for(const h of customer.headers){ const td=document.createElement('td'); td.textContent=(row[h]??'').toString(); tr.appendChild(td);} tbody.appendChild(tr);} table.appendChild(tbody); }
+
+    function getMappingSelects(){ return Array.from(document.querySelectorAll('#mappingRows .mapping-row select[data-master], #mappingRows .mapping-row select:nth-child(2)')) }
+    function cacheSelectOptions(sel){ if(!sel) return; if(sel._allOptions) return; sel._allOptions = Array.from(sel.options).map(o=>({value:o.value, text:o.text})); }
+    function getChosenValues(){ const chosen=new Set(); getMappingSelects().forEach(sel=>{ if(sel.value) chosen.add(sel.value); }); return chosen; }
+    function rebuildOptionsForSelect(sel, chosen){ if(!sel || !sel._allOptions) return; const keep=sel.value; const optionsToShow=sel._allOptions.filter(o=>!o.value || o.value===keep || !chosen.has(o.value)); const currentSig=Array.from(sel.options).map(o=>o.value+'\u0001'+o.text).join('\u0002'); const nextSig=optionsToShow.map(o=>o.value+'\u0001'+o.text).join('\u0002'); if(currentSig===nextSig) return; sel.innerHTML=''; optionsToShow.forEach(o=> sel.add(new Option(o.text,o.value))); sel.value=keep||''; }
+    function syncSourceOptions(){ const chosen=getChosenValues(); getMappingSelects().forEach(sel=> rebuildOptionsForSelect(sel, chosen)); }
+
+    function buildMappingUI(){ if(!customer.headers.length){ $('mappingArea').style.display='none'; $('mappingNotice').style.display='block'; $('exportBtn').disabled=true; return; } $('mappingNotice').style.display='none'; $('mappingArea').style.display='block'; const rows=$('mappingRows'); rows.innerHTML='';
+      const sortedHeaders=[...customer.headers].sort((a,b)=>a.localeCompare(b));
+      master.headers.forEach(hdr=>{
+        const row=document.createElement('div'); row.className='mapping-row';
+        const label=document.createElement('div'); label.textContent=hdr; label.className='pill col-name';
+        const isFallback=FALLBACK_DEFAULT_COLUMNS.has(hdr);
+        if(isFallback){ const b=document.createElement('span'); b.className='pill required'; b.textContent='required'; b.title='Default used only if blank'; label.appendChild(b);} 
+        if (YELLOW_HEADERS.has(hdr)){
+          const y=document.createElement('span');
+          y.className='pill offsite';
+          y.textContent='Off-Site';
+          y.title='Fields used for off-site events';
+          label.appendChild(y);
+        }
+        const sel=document.createElement('select'); sel.add(new Option('— (leave blank)',''));
+        sortedHeaders.forEach(ch=>{ const o=new Option(ch,ch); sel.add(o); });
+        sel.dataset.master=hdr; const best=guessMatch(hdr,customer.headers); if(best) sel.value=best; cacheSelectOptions(sel); sel.addEventListener('change', ()=>{ syncSourceOptions(); });
+        const transform=document.createElement('select');
+        const options=[
+          {val:'none', label:'none – leave as is'},
+          {val:'trim', label:'trim – remove spaces both ends'},
+          {val:'ltrim', label:'ltrim – remove leading spaces'},
+          {val:'rtrim', label:'rtrim – remove trailing spaces'},
+          {val:'upper', label:'upper – HELLO WORLD'},
+          {val:'lower', label:'lower – hello world'},
+          {val:'title', label:'title – Hello World'},
+          {val:'digits-only', label:'digits-only – 12345'},
+          {val:'date:MM/DD/YYYY', label:'date → 12/31/2025 (MM/DD/YYYY)'},
+          {val:'date:YYYY-MM-DD', label:'date → 2025-12-31 (YYYY-MM-DD)'},
+          {val:'date:DD/MM/YYYY', label:'date → 31/12/2025 (DD/MM/YYYY)'}
+        ];
+        options.forEach(o=>transform.add(new Option(o.label,o.val)));
+        transform.value = (hdr === 'date') ? 'date:MM/DD/YYYY' : 'none';
+        const constant=document.createElement('input'); constant.type='text'; constant.placeholder=isFallback?'Optional default (used only if blank)':'Disabled';
+        if(isFallback && PREFILLED_DEFAULTS[hdr]) constant.value=PREFILLED_DEFAULTS[hdr];
+        if(!isFallback){
+          constant.disabled=true; constant.classList.add('disabled-cell');
+        }
+        if(hdr==='room'){ sel.addEventListener('change', updateRoomsPreview); transform.addEventListener('change', updateRoomsPreview); constant.addEventListener('input', updateRoomsPreview);} 
+        row.appendChild(label); row.appendChild(sel); row.appendChild(transform); row.appendChild(constant); rows.appendChild(row); 
+      });
+      $('exportBtn').disabled=false; updateRoomsPreview(); autoLoadMapping(); syncSourceOptions();
+    }
+
+    function titleCase(s){ return s.replace(/\w\S*/g,t=>t[0].toUpperCase()+t.slice(1).toLowerCase()); }
+    function applyTransform(v,k){ if(v==null) v=''; let s=String(v); switch(k){ case 'trim': return s.trim(); case 'ltrim': return s.replace(/^\s+/, ''); case 'rtrim': return s.replace(/\s+$/, ''); case 'upper': return s.toUpperCase(); case 'lower': return s.toLowerCase(); case 'title': return titleCase(s); case 'digits-only': return s.replace(/\D+/g,''); default: if(k&&k.startsWith('date:')){ const fmt=k.split(':')[1]; const d=parseDateSmart(s); if(d) return formatDate(d,fmt);} return s; } }
+    function formatDate(d,fmt){ const yyyy=d.getFullYear(); const mm=d.getMonth()+1; const dd=d.getDate(); const MM=String(mm).padStart(2,'0'); const DD=String(dd).padStart(2,'0'); return fmt.replace('YYYY',String(yyyy)).replace('MM',MM).replace('DD',DD); }
+    function parseDateSmart(s){ if(!s) return null; const t=String(s).trim(); let d=new Date(t); if(!isNaN(d)) return d; const m=t.match(/^([0-3]?\d)[\/\-]([0-3]?\d)[\/\-](\d{2,4})$/); if(m){ let a=+m[1], b=+m[2], y=+m[3]; if(y<100) y+=2000; let mm,dd; if(a>12){ dd=a; mm=b;} else if(b>12){ mm=a; dd=b;} else { mm=a; dd=b;} d=new Date(y,mm-1,dd); if(!isNaN(d)) return d;} return null; }
+
+    // ===== Rooms helpers =====
+    function getRoomSeps(){ const el=$('roomSeps'); const v=(el&&typeof el.value==='string')?el.value:''; return v||',/;|:'; }
+    function splitRooms(cell,seps){ if(cell==null) return []; let s=String(cell).trim(); if(!s) return []; const chars=(seps||'').split(''); if(chars.length===0) return [s]; for(const ch of chars){ s=splitAndJoin(s,ch,NL);} return s.split(NL).map(x=>x.trim()).filter(Boolean); }
+    function splitAndJoin(s,needle,repl){ return s.split(needle).join(repl); }
+    function normalizeRoom(r){ return String(r).trim().replace(/\s+/g,' '); }
+    function uniqueCaseInsensitive(list){ const seen=new Map(); list.forEach(item=>{ const key=String(item).toLowerCase(); if(!seen.has(key)) seen.set(key,item); }); return Array.from(seen.values()); }
+    function computeRoomsFromCurrentMapping(){ const rows=Array.from(document.querySelectorAll('#mappingRows .mapping-row')); const roomRow=rows.find(r=>{ const lbl=r.children[0]; const key=(lbl.firstChild&&lbl.firstChild.nodeType===Node.TEXT_NODE)?lbl.firstChild.nodeValue:lbl.textContent.replace('required','').trim(); return key==='room';}); if(!roomRow) return []; const sel=roomRow.children[1]; const tr=roomRow.children[2]; const constant=roomRow.children[3]; const seps=getRoomSeps(); const values=[]; for(const src of (customer.rows||[])){ let v=''; if(sel&&sel.value){ v=src[sel.value]; } if(FALLBACK_DEFAULT_COLUMNS.has('room') && (!v||v==='') && constant && constant.value){ v=constant.value; } v=applyTransform(v, tr?tr.value:'none'); values.push(...splitRooms(v,seps)); } const normed=values.map(normalizeRoom).filter(Boolean); return uniqueCaseInsensitive(normed).sort((a,b)=>a.localeCompare(b)); }
+    function computeStatusesFromCurrentMapping(){ const rows=Array.from(document.querySelectorAll('#mappingRows .mapping-row')); const statusRow=rows.find(r=>{ const lbl=r.children[0]; const key=(lbl.firstChild&&lbl.firstChild.nodeType===Node.TEXT_NODE)?lbl.firstChild.nodeValue:lbl.textContent.replace('required','').trim(); return key==='status';}); if(!statusRow) return []; const sel=statusRow.children[1]; const tr=statusRow.children[2]; const constant=statusRow.children[3]; const vals=[]; for(const src of (customer.rows||[])){ let v=''; if(sel&&sel.value){ v=src[sel.value]; } if(FALLBACK_DEFAULT_COLUMNS.has('status') && (!v||v==='') && constant && constant.value){ v=constant.value; } v=applyTransform(v, tr?tr.value:'none'); if(v!=null) vals.push(String(v).trim()); } return uniqueCaseInsensitive(vals).filter(Boolean).sort((a,b)=>a.localeCompare(b)); }
+    function computeOwnersFromCurrentMapping(){ const rows=Array.from(document.querySelectorAll('#mappingRows .mapping-row')); const ownerRow=rows.find(r=>{ const lbl=r.children[0]; const key=(lbl.firstChild&&lbl.firstChild.nodeType===Node.TEXT_NODE)?lbl.firstChild.nodeValue:lbl.textContent.replace('required','').trim(); return key==='owner';}); if(!ownerRow) return []; const sel=ownerRow.children[1]; const tr=ownerRow.children[2]; const constant=ownerRow.children[3]; const vals=[]; for(const src of (customer.rows||[])){ let v=''; if(sel&&sel.value){ v=src[sel.value]; } if(FALLBACK_DEFAULT_COLUMNS.has('owner') && (!v||v==='') && constant && constant.value){ v=constant.value; } v=applyTransform(v, tr?tr.value:'none'); if(v!=null) vals.push(String(v).trim()); } return uniqueCaseInsensitive(vals).filter(Boolean).sort((a,b)=>a.localeCompare(b)); }
+
+    // Live Rooms preview (list + count)
+    function updateRoomsPreview(){
+      const list=$('roomsList'); const count=$('roomsCount');
+      if(!list||!count) return;
+      try{
+        const rooms=computeRoomsFromCurrentMapping();
+        list.innerHTML='';
+        rooms.forEach(r=>{ const chip=document.createElement('span'); chip.className='room-chip'; chip.textContent=r; list.appendChild(chip); });
+        count.textContent=String(rooms.length);
+      }catch(err){ console.error('updateRoomsPreview error',err); }
+    }
+
+    // ===== Status mapping =====
+    let STATUS_MAP_ENABLED=false; let STATUS_MAP={};
+    function STATUS_DEFAULT_KEY(){ return 'pgmi:statusmap:default:' + (customer.sourceKey||'unknown'); }
+    function statusEnabledKey(){ return 'pgmi:statusmap:enabled:'+(customer.sourceKey||'unknown'); }
+    function setStatusMappingEnabled(v){ STATUS_MAP_ENABLED=!!v; const area=$('statusMapArea'); if(area) area.style.display=v?'block':'none'; const btn=$('toggleStatusMap'); if(btn) btn.textContent=v?'Disable status mapping':'Enable status mapping'; if(v) buildStatusMappingUI(); try{ localStorage.setItem(statusEnabledKey(), JSON.stringify(STATUS_MAP_ENABLED)); }catch(_){ } }
+    function initStatusMappingSection(){ STATUS_MAP_ENABLED=false; const area=$('statusMapArea'); if(area) area.style.display='none'; const btn=$('toggleStatusMap'); if(btn){ btn.textContent='Enable status mapping'; btn.onclick=()=> setStatusMappingEnabled(!STATUS_MAP_ENABLED); } }
+    function getStatusMapKey(){ return 'pgmi:statusmap:'+(customer.sourceKey||'unknown'); }
+    function guessCanonicalStatus(s){ const t=String(s||'').toLowerCase(); if(/prospect|lead|inquiry|enquir/.test(t)) return 'Prospect'; if(/tentative|pending|hold|penc?il/.test(t)) return 'Tentative'; if(/definite|confirmed|booked|contract|firm|guaranteed/.test(t)) return 'Definite'; if(/closed(?!.*lost)|won|completed|fulfilled/.test(t)) return 'Closed'; if(/lost|cancel|cancell|closed.*lost|abandoned|declined/.test(t)) return 'Lost'; return 'Tentative'; }
+    function buildStatusMappingUI(){ const wrap=$('statusMapRows'); if(!wrap) return; wrap.innerHTML=''; const defSel=$('statusDefault'); if(defSel){ try{ const saved=localStorage.getItem(STATUS_DEFAULT_KEY()); if(saved!==null) defSel.value=saved; }catch(_){} } const originals=computeStatusesFromCurrentMapping(); originals.forEach(orig=>{ const row=document.createElement('div'); row.className='mapping-row'; const left=document.createElement('div'); left.textContent=orig||'(blank)'; const right=document.createElement('select'); CANON_STATUSES.forEach(o=>right.add(new Option(o,o))); const key=String(orig||'').toLowerCase(); right.value = STATUS_MAP[key] || (($('statusDefault')&&$('statusDefault').value) ? $('statusDefault').value : guessCanonicalStatus(orig)); right.dataset.orig=key; row.appendChild(left); row.appendChild(document.createTextNode('↦')); row.appendChild(right); row.appendChild(document.createElement('div')); wrap.appendChild(row); }); const defSel2=$('statusDefault'); const applyAll=$('applyStatusDefaultAll'); if(defSel2){ defSel2.onchange=()=>{ try{ localStorage.setItem(STATUS_DEFAULT_KEY(), defSel2.value||''); }catch(_){} } } if(applyAll){ applyAll.onclick=()=>{ const v=($('statusDefault')&&$('statusDefault').value)||''; if(!v){ toast('Choose a default first','warn'); return;} document.querySelectorAll('#statusMapRows select').forEach(sel=> sel.value=v ); toast(`Applied ${v} to all statuses`); } }
+    }
+    function collectStatusMap(){ const map={}; document.querySelectorAll('#statusMapRows select').forEach(sel=>{ map[sel.dataset.orig]=sel.value; }); return map; }
+    function saveStatusMap(){ try{ STATUS_MAP=collectStatusMap(); localStorage.setItem(getStatusMapKey(), JSON.stringify(STATUS_MAP)); toast('Status mapping saved'); }catch(_){ toast('Failed to save status mapping','error'); } }
+    function loadStatusMap(){ try{ const raw=localStorage.getItem(getStatusMapKey()); if(!raw){ toast('No saved status mapping for this file','warn'); return; } STATUS_MAP=JSON.parse(raw)||{}; buildStatusMappingUI(); toast('Status mapping loaded'); }catch(_){ toast('Failed to load status mapping','error'); } }
+    function autoLoadStatusMap(){ try{ const raw=localStorage.getItem(getStatusMapKey()); if(!raw) return; STATUS_MAP=JSON.parse(raw)||{}; }catch(_){} }
+    function canonicalizeStatus(s){ if(!STATUS_MAP_ENABLED) return s; if(s==null) return ''; const key=String(s).toLowerCase(); const mapped=STATUS_MAP[key]; if(mapped) return mapped; let def=''; try{ def = localStorage.getItem(STATUS_DEFAULT_KEY()) || ''; }catch(_){} return def || s; }
+
+    // ===== OWNER MAPPING =====
+    let OWNER_MAP_ENABLED=false; let OWNER_MAP={};
+    function ownerEnabledKey(){ return 'pgmi:ownermap:enabled:'+(customer.sourceKey||'unknown'); }
+    function setOwnerMappingEnabled(v){ OWNER_MAP_ENABLED=!!v; const area=$('ownerMapArea'); if(area) area.style.display=v?'block':'none'; const btn=$('toggleOwnerMap'); if(btn) btn.textContent=v?'Disable owner mapping':'Enable owner mapping'; if(v){ buildOwnerMappingUI(); } try{ localStorage.setItem(ownerEnabledKey(), JSON.stringify(OWNER_MAP_ENABLED)); }catch(_){} }
+    function initOwnerMappingSection(){ const btn=$('toggleOwnerMap'); if(btn){ btn.onclick=()=> setOwnerMappingEnabled(!OWNER_MAP_ENABLED); } OWNER_MAP_ENABLED=false; const area=$('ownerMapArea'); if(area) area.style.display='none'; const b=$('toggleOwnerMap'); if(b) b.textContent='Enable owner mapping'; }
+    function buildOwnerMappingUI(){ const wrap=$('ownerMapRows'); if(!wrap) return; wrap.innerHTML=''; const originals=computeOwnersFromCurrentMapping(); originals.forEach(orig=>{ const row=document.createElement('div'); row.className='mapping-row'; const left=document.createElement('div'); left.className='col-name'; left.textContent=orig||'(blank)'; const sel=document.createElement('select'); sel.dataset.orig=(orig||'').toLowerCase(); sel.add(new Option('Leave as is','leave')); sel.add(new Option('Replace with…','replace')); const custom=document.createElement('input'); custom.type='text'; custom.placeholder='New owner value'; custom.style.display='none'; const saved=OWNER_MAP[sel.dataset.orig]; if(saved){ sel.value=saved.mode||'leave'; if(saved.mode==='replace'){ custom.style.display='block'; custom.value=saved.value||''; } }
+      sel.onchange=()=>{ if(sel.value==='replace'){ custom.style.display='block'; custom.focus(); OWNER_MAP[sel.dataset.orig]={mode:'replace', value:custom.value||''}; } else { custom.style.display='none'; OWNER_MAP[sel.dataset.orig]={mode:'leave'}; } };
+      custom.oninput=()=>{ OWNER_MAP[sel.dataset.orig] = { mode:'replace', value:custom.value }; };
+      row.appendChild(left);
+      const arrow=document.createElement('span'); arrow.className='arrow'; arrow.textContent='↦'; row.appendChild(arrow);
+      row.appendChild(sel);
+      row.appendChild(custom); wrap.appendChild(row); }); }
+    function collectOwnerMap(){ const map={}; document.querySelectorAll('#ownerMapRows .mapping-row').forEach(row=>{ const sel=row.querySelector('select'); const custom=row.querySelector('input'); if(!sel) return; const key=(sel.dataset.orig||'').toLowerCase(); if(sel.value==='replace') map[key]={mode:'replace',value:(custom&&custom.value?custom.value:'')}; else map[key]={mode:'leave'}; }); return map; }
+
+    // ===== ROOM MAPPING =====
+    let ROOM_MAP_ENABLED=false; let ROOM_MAP={};
+    function setRoomMappingEnabled(v){ ROOM_MAP_ENABLED=!!v; const area=$('roomMapArea'); if(area) area.style.display=v?'block':'none'; const btn=$('toggleRoomMap'); if(btn) btn.textContent=v?'Disable room mapping':'Enable room mapping'; if(v){ buildRoomMappingUI(); } }
+    function initRoomMappingSection(){ const btn=$('toggleRoomMap'); if(btn){ btn.onclick=()=> setRoomMappingEnabled(!ROOM_MAP_ENABLED); } ROOM_MAP_ENABLED=false; const area=$('roomMapArea'); if(area) area.style.display='none'; const b=$('toggleRoomMap'); if(b) b.textContent='Enable room mapping'; }
+    function buildRoomMappingUI(){ const wrap=$('roomMapRows'); if(!wrap) return; wrap.innerHTML=''; const originals=computeRoomsFromCurrentMapping(); originals.forEach(orig=>{ const row=document.createElement('div'); row.className='mapping-row'; const left=document.createElement('div'); left.className='col-name'; left.textContent=orig||'(blank)'; const sel=document.createElement('select'); sel.dataset.orig=(orig||'').toLowerCase(); sel.add(new Option('Leave as is','leave')); sel.add(new Option('Replace with…','replace')); const custom=document.createElement('input'); custom.type='text'; custom.placeholder='New room value'; custom.style.display='none'; const saved=ROOM_MAP[sel.dataset.orig]; if(saved){ sel.value=saved.mode||'leave'; if(saved.mode==='replace'){ custom.style.display='block'; custom.value=saved.value||''; } }
+      sel.onchange=()=>{ if(sel.value==='replace'){ custom.style.display='block'; custom.focus(); ROOM_MAP[sel.dataset.orig]={mode:'replace', value:custom.value||''}; } else { custom.style.display='none'; ROOM_MAP[sel.dataset.orig]={mode:'leave'}; } };
+      custom.oninput=()=>{ ROOM_MAP[sel.dataset.orig] = { mode:'replace', value:custom.value }; };
+      row.appendChild(left);
+      const arrow=document.createElement('span'); arrow.className='arrow'; arrow.textContent='↦'; row.appendChild(arrow);
+      row.appendChild(sel);
+      row.appendChild(custom); wrap.appendChild(row); }); }
+    function collectRoomMap(){ const map={}; document.querySelectorAll('#roomMapRows .mapping-row').forEach(row=>{ const sel=row.querySelector('select'); const custom=row.querySelector('input'); if(!sel) return; const key=(sel.dataset.orig||'').toLowerCase(); if(sel.value==='replace') map[key]={mode:'replace',value:(custom&&custom.value?custom.value:'')}; else map[key]={mode:'leave'}; }); return map; }
+
+    // ===== Find & Replace helpers =====
+    const RE_ESCAPER=/[.*+?^${}()|[\]\\]/g; // escape for RegExp
+    function genericFindReplace(raw, map){ if(raw==null) return ''; let out=String(raw); try{ for(const [k,cfg] of Object.entries(map||{})){ if(!cfg||cfg.mode!=='replace'||!k) continue; const safe=k.replace(RE_ESCAPER,'\\$&'); const re=new RegExp(safe,'gi'); out=out.replace(re, (cfg.value!=null?String(cfg.value):'')); } }catch(_){} return out; }
+    function canonicalizeOwner(o,mapOpt){ const raw=(o==null?'':String(o)); const map=mapOpt||OWNER_MAP; const exact=map && map[String(raw).trim().toLowerCase()]; if(exact && exact.mode==='replace') return (exact.value!=null?String(exact.value):''); return genericFindReplace(raw,map); }
+    function canonicalizeRoomCell(cell,mapOpt){ const raw=(cell==null?'':String(cell)); const map=mapOpt||ROOM_MAP; const exact=map && map[String(raw).trim().toLowerCase()]; if(exact && exact.mode==='replace') return (exact.value!=null?String(exact.value):''); return genericFindReplace(raw,map); }
+    function canonicalizeRoomValue(cell){
+      const seps=getRoomSeps();
+      const tokens=splitRooms(cell,seps).map(t=>normalizeRoom(canonicalizeRoomCell(t, ROOM_MAP))).filter(Boolean);
+      const uniq=uniqueCaseInsensitive(tokens);
+      const mode=($('roomSepMode')&&$('roomSepMode').value)||'leave';
+      let joiner=', ';
+      if(mode==='replace'){
+        const repl=($('roomSepReplace')&&typeof $('roomSepReplace').value==='string')?$('roomSepReplace').value:'';
+        joiner=repl==null? ', ' : String(repl);
+      } else {
+        const exp=($('roomSep')&&$('roomSep').value)||',';
+        joiner = exp === '' ? '' : (exp.trim() === exp ? exp + ' ' : exp);
+      }
+      return uniq.join(joiner);
+    }
+
+    // ===== Export helpers =====
+    function replaceRoomSeps(str,seps,repl){ if(str==null) return ''; const list=splitRooms(str,seps); if(!repl && repl!=='') repl=', '; return list.join(repl); }
+    function autoFitWidths(ws, columns){ columns.forEach(colIdx=>{ const col=ws.getColumn(colIdx); let max=0; col.eachCell({ includeEmpty:true }, (cell)=>{ const v=(cell.value==null?'':String(cell.value)); max=Math.max(max, v.length); }); max=Math.max(max, 10); max=Math.min(max+2, 60); col.width=max; col.alignment={ wrapText:false }; }); }
+    function ownerMappingIsActive(){ if(OWNER_MAP_ENABLED) return true; try{ return Object.values(collectOwnerMap()).some(cfg=>cfg && cfg.mode==='replace'); }catch(_){ return false; } }
+    function roomMappingIsActive(){ if(ROOM_MAP_ENABLED) return true; try{ return Object.values(collectRoomMap()).some(cfg=>cfg && cfg.mode==='replace'); }catch(_){ return false; } }
+
+    function exportFile(){ try{
+      if(!customer.rows.length){ log('danger','No data rows found to export.'); return; }
+      const mappingRows=Array.from(document.querySelectorAll('#mappingRows .mapping-row'));
+      try{ if(STATUS_MAP_ENABLED){ STATUS_MAP=Object.assign({}, STATUS_MAP, collectStatusMap()); } }catch(_){ }
+      try{ OWNER_MAP=Object.assign({}, collectOwnerMap()); }catch(_){ }
+      try{ ROOM_MAP=Object.assign({}, collectRoomMap()); }catch(_){ }
+      function headerKeyFromLabel(el){ if(el && el.firstChild && el.firstChild.nodeType===Node.TEXT_NODE){ return el.firstChild.nodeValue.trim(); } return (el.textContent||'').replace('required','').trim(); }
+      const used=new Set(); mappingRows.forEach(row=>{ const sel=row.children[1]; if(sel&&sel.value) used.add(sel.value);});
+      const append=$('appendExtras')?.checked; const extras=append?customer.headers.filter(h=>h && !used.has(h)):[].sort((a,b)=>a.localeCompare(b));
+      const headersOut=[...master.headers, ...extras];
+      const outRows=[];
+      const applyOwnerMap = ownerMappingIsActive();
+      const applyRoomMap = roomMappingIsActive();
+      for(const srcRow of customer.rows){
+        const out={};
+        mappingRows.forEach(row=>{
+          const labelEl=row.children[0];
+          const sel=row.children[1];
+          const transform=row.children[2];
+          const constant=row.children[3];
+          const key=headerKeyFromLabel(labelEl);
+          let value='';
+          if(sel&&sel.value) value=srcRow[sel.value];
+          if(FALLBACK_DEFAULT_COLUMNS.has(key)){
+            if((value===''||value==null) && constant && constant.value) value=constant.value;
+          }
+          value=applyTransform(value, transform?transform.value:'none');
+          if(key==='room'){
+            value = applyRoomMap ? canonicalizeRoomValue(value) : value;
+          }
+          if(key==='status'){
+            if(STATUS_MAP_ENABLED) value=canonicalizeStatus(value);
+          }
+          if(key==='owner'){
+            value = applyOwnerMap ? canonicalizeOwner(value, OWNER_MAP) : value;
+          }
+          out[key]=value;
+        });
+        extras.forEach(h=>{ out[h]=srcRow[h]; });
+        outRows.push(out);
+      }
+      const sheetName=$('sheetName').value.trim()||master.sheetName||'Events';
+      const fmt=$('exportFormat').value;
+      let fname=$('fileName').value.trim()||`master_output.${fmt}`; fname=fname.replace(/\s+/g,'_');
+      if(fmt==='xlsx' && window.ExcelJS){
+        const wb=new ExcelJS.Workbook();
+        const ws=wb.addWorksheet(sheetName);
+        const headerRow=ws.addRow(headersOut);
+        headerRow.eachCell((cell,i)=>{ const key=headersOut[i-1]; let argb=null; if(RED_HEADERS.has(key)) argb='FFFF0000'; else if(YELLOW_HEADERS.has(key)) argb='FFFFFF00'; else if(extras.includes(key)) argb='FF90EE90'; if(argb){ cell.fill={type:'pattern',pattern:'solid',fgColor:{argb}}; cell.font={color:{argb:'FF000000'},bold:true}; }});
+        for(const row of outRows){ ws.addRow(headersOut.map(h=>row[h])); }
+        try{
+          if($('includeRoomsSheet')?.checked){
+            const srcRooms=computeRoomsFromCurrentMapping();
+            const mappedRooms = roomMappingIsActive() ? uniqueCaseInsensitive(srcRooms.map(r=>canonicalizeRoomCell(r, ROOM_MAP))).sort((a,b)=>a.localeCompare(b)) : srcRooms;
+            const statusesRaw=computeStatusesFromCurrentMapping();
+            const statuses=STATUS_MAP_ENABLED?uniqueCaseInsensitive(statusesRaw.map(canonicalizeStatus)).sort((a,b)=>a.localeCompare(b)):statusesRaw;
+            const ownersRaw=computeOwnersFromCurrentMapping();
+            const owners = ownerMappingIsActive()? uniqueCaseInsensitive(ownersRaw.map(o=>canonicalizeOwner(o, OWNER_MAP))).sort((a,b)=>a.localeCompare(b)) : ownersRaw;
+            if(mappedRooms.length||statuses.length||extras.length||owners.length){
+              const rs=wb.addWorksheet('Lists');
+
+// UPDATED headers:
+//  A: room (exported)
+//  B: in TS (user input list for rooms)
+//  C: status
+//  D: (spacer)
+//  E: appended_headers
+//  F: (spacer)
+//  G: owners (exported)
+//  H: owners in TS (user input for owners)
+//  I: unmatched_rooms (A not in any B)
+//  J: unmatched_owners (G not in any H)
+const listHeaders=['room','room in TS','', 'owners','owners in TS','', 'status','', 'unmatched_rooms','unmatched_owners','unmatched_status','appended_headers'];
+const hr=rs.addRow(listHeaders);
+hr.font={bold:true};
+hr.eachCell(c=>{ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFFF00'}}; c.font={color:{argb:'FF000000'},bold:true}; });
+// Light green on I,J,K,L headers
+try {
+  ['I1','J1','K1','L1'].forEach(addr=>{ const cell=rs.getCell(addr); cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFCCFFCC'}}; cell.font={color:{argb:'FF000000'},bold:true}; });
+}catch(_){}
+
+
+try{ rs.getCell(1,7).note = 'Valid statuses: Prospect, Tentative, Definite, Closed, Lost. Column K flags anything outside this set.'; }catch(_){}
+// Notes on headers B1 and H1
+
+try{ rs.getCell(1,2).note = 'Paste or type your room list here. If a value in column B matches a room in column A, that room will be un-reported in column I.'; }catch(_){}
+try{ rs.getCell(1,5).note = 'Paste or type your owners list here (column E). If it matches an owner in column D, that owner will be un-reported in column J.'; }catch(_){}
+
+// Data validation input messages on room/owner user columns
+try{
+  rs.dataValidations.add('B2:B1048576', {
+    type: 'textLength',
+    operator: 'greaterThanOrEqual',
+    showInputMessage: true,
+    allowBlank: true,
+    formulae: [0],
+    promptTitle: 'Rooms in TS',
+    prompt: 'Paste or type rooms here. Matches will be un-reported.'
+  });
+  rs.dataValidations.add('E2:E1048576', {
+    type: 'textLength',
+    operator: 'greaterThanOrEqual',
+    showInputMessage: true,
+    allowBlank: true,
+    formulae: [0],
+    promptTitle: 'Owners in TS',
+    prompt: 'Paste or type owners here. Matches will be un-reported.'
+  });
+  rs.dataValidations.add('G2:G1048576', {
+    type: 'list',
+    allowBlank: true,
+    showInputMessage: true,
+    formulae: ['"Prospect,Tentative,Definite,Closed,Lost"'],
+    promptTitle: 'Valid Statuses',
+    prompt: 'Choose one of: Prospect, Tentative, Definite, Closed, Lost.'
+  });
+
+}catch(_){}
+
+// Calculate max rows
+const maxRows=Math.max(mappedRooms.length,statuses.length,extras.length,owners.length);
+
+// Write rows: room, status, appended headers, owners; blanks for in-TS columns
+for(let i=0;i<maxRows;i++){
+  const r=rs.getRow(i+2);
+
+  // A: exported room
+  if(mappedRooms[i]) r.getCell(1).value=mappedRooms[i];
+
+  // C: status
+  if(statuses[i]) r.getCell(7).value=statuses[i];
+
+  // E: appended_headers
+  if(extras[i]) r.getCell(12).value=extras[i];
+
+  // G: owners (exported)
+  if(owners[i]) r.getCell(4).value=owners[i];
+
+  // I: unmatched_rooms -> IF(A2="","",IF(COUNTIF($B:$B,A2)>0,"",A2))
+  const rowIdx=i+2;
+  r.getCell(9).value={ formula: `IF(A${rowIdx}="","",IF(COUNTIF($B:$B,A${rowIdx})>0,"",A${rowIdx}))` };
+
+  // J: unmatched_owners -> IF(G2="","",IF(COUNTIF($H:$H,G2)>0,"",G2))
+  r.getCell(10).value={ formula: `IF(D${rowIdx}="","",IF(COUNTIF($E:$E,D${rowIdx})>0,"",D${rowIdx}))` };
+  // K: unmatched_status -> IF(C2="","",IF(ISNUMBER(MATCH(C2,{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",C2))
+  r.getCell(11).value={ formula: `IF(G${rowIdx}="","",IF(ISNUMBER(MATCH(G${rowIdx},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G${rowIdx}))` };
+
+
+  if(r.commit) r.commit();
+}
+
+// Auto-fit relevant columns including new inputs and unmatched columns
+autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
+            }
+          }
+        }catch(_){ }
+        wb.xlsx.writeBuffer().then(buf=>{
+          if(!/\.xlsx$/i.test(fname)) fname=fname.replace(/\.[^/.]+$/, '')+'.xlsx';
+          const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+          const link=document.createElement('a'); link.href=URL.createObjectURL(blob); link.download=fname; link.click(); URL.revokeObjectURL(link.href);
+          log('success',`Exported ${outRows.length} rows to ${fname}`);
+        }).catch(err=>log('danger','ExcelJS export error: '+(err.message||String(err))));
+      } else if(fmt==='xlsx'){
+        const wb=XLSX.utils.book_new();
+        const ws=XLSX.utils.json_to_sheet(outRows,{header:headersOut,skipHeader:false});
+        XLSX.utils.sheet_add_aoa(ws,[headersOut],{origin:'A1'});
+        XLSX.utils.book_append_sheet(wb,ws,sheetName);
+        if(!/\.xlsx$/i.test(fname)) fname=fname.replace(/\.[^/.]+$/, '')+'.xlsx';
+        XLSX.writeFile(wb,fname,{bookType:'xlsx'});
+        log('success',`Exported ${outRows.length} rows to ${fname}`);
+      } else {
+        const csvHeader=headersOut.join(',');
+        const csvRows=outRows.map(r=> headersOut.map(h=>{ const v=r[h]==null?'':String(r[h]); if(/[",\n]/.test(v)) return '"'+v.replace(/\"/g,'\"\"')+'"'; return v; }).join(','));
+        const csv=[csvHeader,...csvRows].join('\n');
+        if(!/\.csv$/i.test(fname)) fname=fname.replace(/\.[^/.]+$/, '')+'.csv';
+        const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+        const link=document.createElement('a'); link.href=URL.createObjectURL(blob); link.download=fname; link.click(); URL.revokeObjectURL(link.href);
+        log('success',`Exported ${outRows.length} rows to ${fname}`);
+      }
+    } catch(err){ log('danger','Export error: '+(err.message||String(err))); console.error(err); } }
+
+    // ===== Mapping persistence =====
+    const MAP_NS='pgmi:map:';
+    function currentMapKey(){ return MAP_NS+(customer.sourceKey||'unknown'); }
+    function collectMapping(){ const mapping={}; document.querySelectorAll('#mappingRows .mapping-row').forEach(row=>{ const master=row.children[0].firstChild && row.children[0].firstChild.nodeType===Node.TEXT_NODE ? row.children[0].firstChild.nodeValue.trim() : row.children[0].textContent.replace('required','').trim(); const sel=row.children[1].value||''; const tr=row.children[2].value||'none'; const def=row.children[3].disabled?undefined:row.children[3].value; mapping[master]={source:sel,transform:tr,def}; }); return mapping; }
+    function applyMapping(mapping){ if(!mapping) return; document.querySelectorAll('#mappingRows .mapping-row').forEach(row=>{ const master=row.children[0].firstChild && row.children[0].firstChild.nodeType===Node.TEXT_NODE ? row.children[0].firstChild.nodeValue.trim() : row.children[0].textContent.replace('required','').trim(); const cfg=mapping[master]; if(!cfg) return; const sel=row.children[1]; const tr=row.children[2]; const def=row.children[3]; if(sel && cfg.source && Array.from(sel.options).some(o=>o.value===cfg.source)) sel.value=cfg.source; if(tr && cfg.transform) tr.value=cfg.transform; if(def && !def.disabled && typeof cfg.def==='string') def.value=cfg.def; }); updateRoomsPreview(); syncSourceOptions(); }
+    function saveMapping(){ try{ const data=JSON.stringify(collectMapping()); localStorage.setItem(currentMapKey(), data); toast('Mapping saved'); }catch(e){ toast('Failed to save mapping','error'); } }
+    function loadMapping(){ try{ const data=localStorage.getItem(currentMapKey()); if(!data){ toast('No saved mapping for this file','warn'); return;} const mapping=JSON.parse(data); applyMapping(mapping); toast('Mapping loaded'); }catch(e){ toast('Failed to load mapping','error'); } }
+    function autoLoadMapping(){ try{ const data=localStorage.getItem(currentMapKey()); if(!data) return; const mapping=JSON.parse(data); applyMapping(mapping); }catch(_){} }
+
+    // ===== UI wiring =====
+    function pill(t){ const s=document.createElement('span'); s.className='pill'; s.textContent=t; return s; }
+    function updateUIAfterLoad(){ const btn=$('togglePreview'); if(btn){ btn.disabled=false; btn.onclick=()=>{ const p=$('preview'); const isOpen=!!(p && p.style.display!=='none'); if(p) p.style.display=isOpen?'none':'block'; btn.textContent=isOpen?'Show Preview':'Hide Preview'; }; const p0=$('preview'); btn.textContent= (p0&&p0.style.display!=='none')?'Hide Preview':'Show Preview'; } renderPreview(); buildMappingUI(); updateRoomsPreview(); initStatusMappingSection(); initRoomMappingSection(); initOwnerMappingSection(); const meta=$('customerMeta'); if(meta){ meta.style.display='flex'; meta.innerHTML=''; } }
+
+    function handleFile(f){
+    if(!window.XLSX){ log('danger','Excel parser not loaded.'); return; }
+    const reader=new FileReader();
+    reader.onload=()=>{
+      try{
+        const data=new Uint8Array(reader.result);
+        const wb=XLSX.read(data,{type:'array'});
+        const sheetName = wb.SheetNames[0];
+        const ws=wb.Sheets[sheetName];
+
+        // Build full rectangular matrix for lossless export
+        const matrix = readWorksheetMatrix(ws);
+        customer.matrix = matrix;
+
+        // Preserve existing UI behavior: headers/rows object-view for mapping/preview
+        const headers = matrix[0];
+        const body = matrix.slice(1);
+        customer.headers = headers.map(h => String(h || '').trim());
+        customer.rows = body.map(r => {
+          const o = {}; for (let i=0; i<headers.length; i++) o[headers[i]] = (r[i] ?? "");
+          return o;
+        });
+
+        customer.sourceKey=`${f.name}|${sheetName}|${customer.headers.join(',')}`.slice(0,500);
+        const meta=$('customerMeta');
+        if(meta){
+          meta.style.display='flex';
+          meta.innerHTML='';
+          meta.appendChild(pill(`File: ${f.name}`));
+          meta.appendChild(pill(`Sheet: ${sheetName}`));
+          meta.appendChild(pill(`${customer.headers.length} columns`));
+          meta.appendChild(pill(`${customer.rows.length} rows`));
+        }
+        updateUIAfterLoad();
+      }catch(err){ log('danger','Failed to read file: '+(err&&err.message?err.message:String(err))); }
+    };
+    reader.onerror=()=>log('danger','File read error');
+    reader.readAsArrayBuffer(f);
+    } const reader=new FileReader(); reader.onload=()=>{ try{ const data=new Uint8Array(reader.result); const wb=XLSX.read(data,{type:'array'}); const ws=wb.Sheets[wb.SheetNames[0]]; const rows=XLSX.utils.sheet_to_json(ws,{defval:'',raw:false}); let headers=getHeadersFromSheet(ws); headers=dedupeHeaders(headers); customer.headers=(headers||[]).map(h=>String(h||'').trim()); customer.rows=rows||[]; customer.sourceKey=`${f.name}|${wb.SheetNames[0]}|${customer.headers.join(',')}`.slice(0,500); const meta=$('customerMeta'); meta.style.display='flex'; meta.innerHTML=''; meta.appendChild(pill(`File: ${f.name}`)); meta.appendChild(pill(`Sheet: ${wb.SheetNames[0]}`)); meta.appendChild(pill(`${customer.headers.length} columns`)); meta.appendChild(pill(`${customer.rows.length} rows`)); updateUIAfterLoad(); }catch(err){ log('danger','Failed to read file: '+(err&&err.message?err.message:String(err))); } }; reader.onerror=()=>log('danger','File read error'); reader.readAsArrayBuffer(f); }
+
+    function wireDnD(){
+      const drop=$('drop'); const input=$('customerFile'); const overlay=$('overlayPicker');
+      if(!drop||!input) return;
+      if(drop.dataset.wired==='1') return; 
+      drop.dataset.wired='1'; input.dataset.wired='1';
+
+      if(overlay){ overlay.addEventListener('change',e=>{ const f=e.target.files && e.target.files[0]; if(f) handleFile(f); try{ e.target.value=''; }catch(_){} }); }
+
+      let _pickLock=false;
+      const triggerPick=(ev)=>{ ev?.preventDefault?.(); if(_pickLock) return; _pickLock=true; try{ input.click(); }catch(e){ try{ input.focus(); input.click(); }catch(_){} } setTimeout(()=>{ _pickLock=false; }, 450); };
+      drop.addEventListener('click', triggerPick);
+      drop.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); triggerPick(e); }});
+      ['dragenter','dragover'].forEach(ev=> drop.addEventListener(ev,e=>{ e.preventDefault(); drop.classList.add('dragover'); }));
+      ['dragleave','drop'].forEach(ev=> drop.addEventListener(ev,e=>{ e.preventDefault(); drop.classList.remove('dragover'); }));
+      drop.addEventListener('drop',e=>{ const f=e.dataTransfer?.files?.[0]; if(!f) return; handleFile(f); });
+      input.addEventListener('change',e=>{ const f=e.target.files[0]; if(!f){ log('danger','No file selected.'); return;} handleFile(f); try{ e.target.value=''; }catch(_){} });
+
+      let _linking=false; const roomsInput=$('roomSeps'); const exportInput=$('roomSep');
+      if(roomsInput && exportInput){
+        roomsInput.addEventListener('input',()=>{ if(_linking) return; _linking=true; exportInput.value=roomsInput.value; _linking=false; updateRoomsPreview(); });
+        exportInput.addEventListener('input',()=>{ if(_linking) return; _linking=true; roomsInput.value=exportInput.value; _linking=false; updateRoomsPreview(); });
+      }
+      const mode=$('roomSepMode'); const repl=$('roomSepReplace');
+      if(mode && repl){ mode.addEventListener('change',()=>{ const isReplace=mode.value==='replace'; repl.disabled=!isReplace; }); }
+      $('refreshRooms')?.addEventListener('click', updateRoomsPreview);
+      $('copyRooms')?.addEventListener('click',()=>{ const rooms=computeRoomsFromCurrentMapping(); const text=rooms.join(NL); navigator.clipboard?.writeText(text).then(()=>toast(`Copied ${rooms.length} room(s)`)).catch(()=>toast('Failed to copy rooms','error')); });
+      $('exportBtn')?.addEventListener('click', exportFile);
+      $('saveMapping')?.addEventListener('click', saveMapping);
+      $('loadMapping')?.addEventListener('click', loadMapping);
+      const btn=$('togglePreview'); if(btn){ btn.disabled=true; btn.textContent='Show Preview'; }
+    }
+
+    // ===== Self-tests =====
+    (function runSelfTests(){
+      try{
+        const deepEq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+        const results=[]; const ok=(name,cond)=>results.push({name,pass:!!cond});
+        // Rooms
+        ok('splitRooms basic', deepEq(splitRooms('Main, PDR;Lane 1', ',;'), ['Main','PDR','Lane 1']));
+        ok('replaceRoomSeps semicolon', replaceRoomSeps('A/B/C','/',';')==='A;B;C');
+        ok('replaceRoomSeps empty repl', replaceRoomSeps('A/B','/','')==='AB');
+        // Owner replace – exact and substring (with regex escaping)
+        const tMap={ 'anaiah': {mode:'replace', value:'Anaiah Dontgoherenomo'}, ' jane doe ': {mode:'replace', value:'J. Doe'}, 'c++': {mode:'replace', value:'CPP'}, '[team]': {mode:'replace', value:'Squad'} };
+        ok('owner replace exact', canonicalizeOwner('Anaiah', tMap)==='Anaiah Dontgoherenomo');
+        ok('owner substring replace', canonicalizeOwner('Lead Owner: Anaiah', tMap)==='Lead Owner: Anaiah Dontgoherenomo');
+        ok('owner escaper pluses', canonicalizeOwner('C++ Lead', tMap)==='CPP Lead');
+        ok('owner escaper brackets', canonicalizeOwner('Alpha [Team] Bravo', tMap)==='Alpha Squad Bravo');
+        ok('owner multi occurrence', canonicalizeOwner('Anaiah + Anaiah', tMap)==='Anaiah Dontgoherenomo + Anaiah Dontgoherenomo');
+        // Room replace tests
+        const rMap={ 'pdr': {mode:'replace', value:'Private Dining'}, 'ballroom a': {mode:'replace', value:'Ballroom Alpha'}, 'arcade mt': {mode:'replace', value:'Arcade'}, 'arcade mg': {mode:'replace', value:'Arcade'} };
+        ok('room replace exact', canonicalizeRoomCell('PDR', rMap)==='Private Dining');
+        ok('room substring replace', canonicalizeRoomCell('Main + PDR', rMap)==='Main + Private Dining');
+        ok('room multiple tokens', canonicalizeRoomCell('PDR / Ballroom A', rMap)==='Private Dining / Ballroom Alpha');
+        // De-dup after mapping
+        ROOM_MAP = rMap;
+        $('roomSepMode') && ($('roomSepMode').value='replace');
+        $('roomSepReplace') && ($('roomSepReplace').value=', ');
+        ok('room dedupe after mapping (replace mode)', canonicalizeRoomValue('Arcade MT/Arcade MG/Arcade MG')==='Arcade');
+        $('roomSepMode') && ($('roomSepMode').value='leave');
+        $('roomSep') && ($('roomSep').value=',');
+        ok('room dedupe after mapping (leave mode)', canonicalizeRoomValue('Arcade MT,Arcade MG,Arcade MT')==='Arcade');
+        ok('room dedupe with pipe sep', canonicalizeRoomValue('Arcade|Arcade|Arcade')==='Arcade');
+        // Status guess sanity
+        ok('status guess tentative', guessCanonicalStatus('pending')==='Tentative');
+        const failed=results.filter(r=>!r.pass);
+        if(failed.length){ console.warn('Self-tests failed:', failed); toast(`${failed.length} self-test(s) failed`,'error'); }
+        else { console.log('%cSelf-tests passed','color:#32d583'); }
+      }catch(err){ console.error('Self-tests error',err); }
+    })();
+
+    // Init
+    document.addEventListener('DOMContentLoaded',()=>{ try{ wireDnD(); }catch(_){} });
+  </script>
 <script async defer src="https://apis.google.com/js/api.js"></script>
 <script async defer src="https://accounts.google.com/gsi/client"></script>
+
 <script>
-const TEMPLATE_ID = "1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
-const CLIENT_ID   = "7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com";
+(function(){
+  const CLIENT_ID="7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com";
+  const TEMPLATE_ID="1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
+  const SCOPES="https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets";
 
-const statusEl = document.getElementById('status');
-const logEl = document.getElementById('log');
-function setStatus(msg, cls="muted"){ statusEl.className = "small " + cls; statusEl.textContent = msg; }
-function log(msg){ logEl.classList.remove('hidden'); logEl.textContent += msg + "\n"; console.log("[fresh]", msg); }
-
-function pickExcel() {
-  return new Promise((resolve)=>{
-    const inp = document.createElement('input');
-    inp.type = 'file';
-    inp.accept = ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-    inp.style.position = 'fixed'; inp.style.left = '-9999px';
-    document.body.appendChild(inp);
-    inp.addEventListener('change', ()=> resolve(inp.files && inp.files[0] ? inp.files[0] : null));
-    inp.click();
+  document.addEventListener("DOMContentLoaded",()=>{
+    const b=document.getElementById("exportToSheetsBtn");
+    if (b) b.addEventListener("click", exportToSheets);
   });
-}
 
-async function ensureGapi() {
-  setStatus("Loading Google APIs…");
-  await new Promise((resolve,reject)=>{ 
-    gapi.load("client", async ()=>{ try{ await gapi.client.init({}); resolve(); }catch(e){ reject(e); } }); 
-  });
-  await gapi.client.load("https://www.googleapis.com/discovery/v1/apis/drive/v3/rest");
-  await gapi.client.load("https://sheets.googleapis.com/$discovery/rest?version=v4");
-  log("gapi loaded");
-}
-
-async function ensureToken() {
-  setStatus("Getting Google token…");
-  return await new Promise((resolve,reject)=>{
-    const tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets",
-      use_fedcm_for_prompt: true,
-      callback: ()=>{}
-    });
-    tokenClient.callback = (r)=> r && r.access_token ? resolve(r.access_token) : reject(new Error(r?.error||"No token"));
-    tokenClient.requestAccessToken({prompt:"consent"});
-  });
-}
-
-async function waitReady(id){
-  for (let i=1;i<=10;i++){
-    try { const r = await gapi.client.sheets.spreadsheets.get({ spreadsheetId:id, fields:"spreadsheetId" }); if (r?.result?.spreadsheetId) return; } catch(_){}
-    await new Promise(r=>setTimeout(r, 250*i));
+  async function gapiBoot(){
+    await new Promise((res,rej)=>{ gapi.load("client", async ()=>{ try{ await gapi.client.init({}); res(); }catch(e){ rej(e); } }); });
+    await gapi.client.load("https://www.googleapis.com/discovery/v1/apis/drive/v3/rest");
+    await gapi.client.load("https://sheets.googleapis.com/$discovery/rest?version=v4");
   }
-  throw new Error("Google Sheet not ready.");
-}
-
-// Upload picked Excel & convert to Google Sheet
-async function uploadAndConvertXlsx(blob, name){
-  const tokenObj = gapi.client.getToken && gapi.client.getToken();
-  const accessToken = tokenObj && tokenObj.access_token ? tokenObj.access_token : null;
-  if (!accessToken) throw new Error("Missing access token");
-
-  const metadata = {
-    name: name + " (Converted)",
-    mimeType: "application/vnd.google-apps.spreadsheet"
-  };
-  const form = new FormData();
-  form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
-  form.append("file", blob, (blob && blob.name) ? blob.name : (name + ".xlsx"));
-
-  const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
-    method: "POST",
-    headers: { "Authorization": "Bearer " + accessToken },
-    body: form
-  });
-  if (!res.ok){
-    const t = await res.text().catch(()=>"(no body)");
-    throw new Error("Upload failed: " + res.status + " " + t);
+  let tokenClient=null;
+  async function getToken(){ if(!tokenClient) tokenClient=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID, scope:SCOPES, use_fedcm_for_prompt:true, callback:()=>{}});
+    return new Promise((resolve,reject)=>{ tokenClient.callback=(r)=>r&&r.access_token?resolve(r.access_token):reject(new Error(r?.error||"no token")); tokenClient.requestAccessToken({prompt:"consent"}); });
   }
-  const json = await res.json();
-  log("Converted file id: " + json.id);
-  return json.id;
-}
+  async function driveCopy(id,name){ const r=await gapi.client.drive.files.copy({fileId:id,supportsAllDrives:true,fields:"id",resource:{name}}); return r.result.id; }
+  async function waitReady(id){ for(let i=1;i<=10;i++){ try{ const r=await gapi.client.sheets.spreadsheets.get({spreadsheetId:id,fields:"spreadsheetId"}); if(r?.result?.spreadsheetId) return; }catch(_){}
+      await new Promise(r=>setTimeout(r, 400*i)); } throw new Error("Sheet not ready after copy."); }
+  async function ensureSheet(id,title){ try{ await gapi.client.sheets.spreadsheets.values.clear({spreadsheetId:id,range:`${title}!A1:ZZ99999`}); } catch(_) { await gapi.client.sheets.spreadsheets.batchUpdate({spreadsheetId:id, resource:{requests:[{addSheet:{properties:{title}}}]}}); } }
+  async function writeRAW(id,title,values){ await gapi.client.sheets.spreadsheets.values.update({spreadsheetId:id,range:`${title}!A1`,valueInputOption:"RAW",resource:{majorDimension:"ROWS",values}}); }
+  async function writeUSER(id,title,values){ await gapi.client.sheets.spreadsheets.values.update({spreadsheetId:id,range:`${title}!A1`,valueInputOption:"USER_ENTERED",resource:{majorDimension:"ROWS",values}}); }
 
-async function copyTemplate(name){
-  const copyRes = await gapi.client.drive.files.copy({
-    fileId: TEMPLATE_ID, supportsAllDrives: true, fields: "id", resource: { name }
-  });
-  return copyRes.result.id;
-}
+  function norm(s){ return String(s||'').toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim(); }
 
-async function listSheets(spreadsheetId){
-  const res = await gapi.client.sheets.spreadsheets.get({
-    spreadsheetId, fields:"sheets(properties(sheetId,title,index))"
-  });
-  return (res.result.sheets||[]).map(s=>s.properties);
+  
+// === Added: Matrix-first data getter (lossless) ===
+function getDataMatrix(){
+  if (typeof customer !== 'undefined' && customer && Array.isArray(customer.matrix) && customer.matrix.length){
+    return { matrix: customer.matrix, source: 'matrix' };
+  }
+  // DOM fallback: scrape visible table into a matrix
+  const t=document.querySelector('table'); if(!t) return null;
+  const thead=t.querySelector('thead'), tbody=t.querySelector('tbody');
+  let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll('th,td')).map(x=>x.textContent.trim());
+  const rowEls = tbody ? Array.from(tbody.querySelectorAll('tr')) : Array.from(t.querySelectorAll('tr'));
+  const bodyRows = rowEls.map(tr=>Array.from(tr.querySelectorAll('td,th')).map(td=>td.textContent.trim()));
+  if (!headers.length && bodyRows.length){ headers = bodyRows.shift(); }
+  const width = Math.max(headers.length, ...bodyRows.map(r=>r.length));
+  const pad = (r)=> (r.length===width ? r : [...r, ...Array(width-r.length).fill("")]);
+  const head = pad(headers.map((h,i)=> String(h||'') || `Column_${i+1}`));
+  const rect = [head, ...bodyRows.map(pad)];
+  return { matrix: rect, source:'dom' };
 }
+;
+        }
+      }
+    } catch(_){}
+    // 2) Fallback: scrape visible table (DOM)
+    const t=document.querySelector('table'); if(!t) return null;
+    const thead=t.querySelector('thead'), tbody=t.querySelector('tbody');
+    let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll('th,td')).map(x=>x.textContent.trim());
+    const rowEls = tbody ? Array.from(tbody.querySelectorAll('tr')) : Array.from(t.querySelectorAll('tr'));
+    const bodyRows = rowEls.map(tr=>Array.from(tr.querySelectorAll('td,th')).map(td=>td.textContent.trim()));
+    if (!headers.length && bodyRows.length){ headers = bodyRows.shift(); }
+    const seen={}; const H=headers.map(h=>{ let k=(h||'').trim()||'Column', b=k, i=1; while(seen[k]){ i++; k=`${b}_${i}`; } seen[k]=true; return k; });
+    const outRows = bodyRows.filter(r=>r.some(v=>v!=='')).map(r=>{ const o={}; for(let i=0;i<H.length;i++) o[H[i]]=(r[i]??'').trim(); return o; });
+    return { headersOut:H, outRows, source:'dom' };
+  }
 
-async function exportFresh(){
+  function computeLists(headersOut, outRows){
+    const owners=new Set(), rooms=new Set(), statuses=new Set();
+    const lc=headersOut.map(h=>norm(h));
+    const find=(names)=>{ for(const n of names){ const i=lc.indexOf(norm(n)); if(i!==-1) return i; } for(let i=0;i<lc.length;i++){ if(names.some(n=>lc[i].includes(norm(n)))) return i; } return -1; };
+    const iRoom=find(['room']);
+    let iOwner=find(['owner','owner name','owner full','primary contact','contact']);
+    const iOwnerFirst=find(['owner first','first name']);
+    const iOwnerLast=find(['owner last','last name']);
+    const iStatus=find(['event status','status']);
+    for(const r of outRows){
+      const vals=headersOut.map(h=>r[h]);
+      if(iRoom!==-1 && vals[iRoom]) String(vals[iRoom]).split(/[,/;|:]/).map(s=>s.trim()).filter(Boolean).forEach(x=>rooms.add(x));
+      let ownerVal='';
+      if(iOwner!==-1 && vals[iOwner]) ownerVal=String(vals[iOwner]).trim();
+      else if(iOwnerFirst!==-1||iOwnerLast!==-1) ownerVal=[vals[iOwnerFirst]||'', vals[iOwnerLast]||''].join(' ').trim();
+      if(ownerVal) owners.add(ownerVal);
+      if(iStatus!==-1 && vals[iStatus]) statuses.add(String(vals[iStatus]).trim());
+    }
+    const CANON=new Set(["Prospect","Tentative","Definite","Closed","Lost"]);
+    const unmatched=[...statuses].filter(s=>!CANON.has(s));
+    return { rooms:[...rooms], owners:[...owners], statuses:unmatched, nonMatched:[] };
+  }
+
+  async function exportToSheets(){
   try{
-    setStatus("Pick the Excel you just downloaded from Generate…");
-    const picked = await pickExcel();
-    if (!picked){ setStatus("Canceled (no Excel picked).", "warn"); return; }
-
-    await ensureGapi();
-    const token = await ensureToken();
-    gapi.client.setToken({access_token: token});
-
-    const baseName = ((document.getElementById("fileName")?.value || "master_output").trim()||"master_output").replace(/\s+/g,"_");
-    const gsName = baseName + " (Google Sheet)";
-    setStatus("Copying your template…");
-    const destId = await copyTemplate(gsName);
-    await waitReady(destId);
-    log("Template copy id: " + destId);
-
-    setStatus("Uploading & converting Excel…");
-    const convertedId = await uploadAndConvertXlsx(picked, baseName);
-
-    setStatus("Copying sheets over…");
-    const srcSheets = await listSheets(convertedId);
-    for (const s of srcSheets){
-      await gapi.client.sheets.spreadsheets.sheets.copyTo({
-        spreadsheetId: convertedId, sheetId: s.sheetId,
-        resource: { destinationSpreadsheetId: destId }
-      });
+    // Lossless data snapshot
+    const snap = getDataMatrix();
+    if(!snap || !snap.matrix || snap.matrix.length < 2){
+      alert('No table detected (or no rows).');
+      return;
     }
+    const eventsGrid = snap.matrix; // [[H...], [r1...], ...]
+    const headersOut = eventsGrid[0];
+    const outRows = eventsGrid.slice(1).map(r => {
+      const o={}; for(let i=0;i<headersOut.length;i++) o[headersOut[i]] = r[i] ?? "";
+      return o;
+    });
 
-    // remove any placeholders in the template copy that didn't come from the Excel
-    const dstSheets = await listSheets(destId);
-    const inserted = new Set(srcSheets.map(s=>s.title));
-    const toDelete = dstSheets.filter(p => !inserted.has(p.title));
-    if (toDelete.length){
-      await gapi.client.sheets.spreadsheets.batchUpdate({
-        spreadsheetId: destId,
-        resource: { requests: toDelete.map(p => ({ deleteSheet: { sheetId: p.sheetId } })) }
-      });
+    // Your existing list builder (unchanged expectation)
+    const lists = computeLists(headersOut, outRows);
+
+    // Names from UI
+    const sheetName=(document.getElementById('sheetName')?.value||'Events').trim()||'Events';
+    const fileName=((document.getElementById('fileName')?.value||'master_output').trim()||'master_output').replace(/\s+/g,'_')+' (Google Sheet)';
+
+    // Auth and template copy
+    await gapiBoot(); const tok=await getToken(); gapi.client.setToken({access_token:tok});
+    const id=await driveCopy(TEMPLATE_ID, fileName); await waitReady(id);
+
+    // Ensure tabs exist
+    await ensureSheet(id, sheetName);
+    await ensureSheet(id, 'Lists');
+
+    // Write full rectangle (A1 origin; Sheets expands as needed)
+    await writeRAW(id, sheetName, eventsGrid);
+
+    // Build & write Lists tab
+    const headers=["room","room in TS","", "owners","owners in TS","", "status","", "unmatched_rooms","unmatched_owners","unmatched_status","appended_headers"];
+    const len=Math.max(lists.rooms.length, lists.owners.length, lists.statuses.length, lists.nonMatched.length, 1);
+    const listGrid=[headers];
+    for(let i=0;i<len;i++){
+      const A=lists.rooms[i]||"", D=lists.owners[i]||"", G=lists.statuses[i]||"", L=lists.nonMatched[i]||"";
+      const r=i+2;
+      const I=`=IF(A${r}="","",IF(COUNTIF($B:$B,A${r})>0,"",A${r}))`;
+      const J=`=IF(D${r}="","",IF(COUNTIF($E:$E,D${r})>0,"",D${r}))`;
+      const K=`=IF(G${r}="","",IF(ISNUMBER(MATCH(G${r},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G${r}))`;
+      listGrid.push([A,"","",D,"","",G,"",I,J,K,L]);
     }
+    await writeUSER(id, 'Lists', listGrid);
 
-    setStatus("Opening Google Sheet…", "ok");
-    window.open(`https://docs.google.com/spreadsheets/d/${destId}/edit`, "_blank");
+    // Open the new Google Sheet
+    window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`,'_blank');
   }catch(e){
     console.error(e);
-    setStatus("Export failed: " + (e?.result?.error?.message || e.message || String(e)), "warn");
-    alert("Export failed: " + (e?.result?.error?.message || e.message || String(e)));
+    alert('Export failed: '+(e?.result?.error?.message||e.message||String(e)));
   }
 }
-
-document.getElementById('btnExport').addEventListener('click', function(e){
-  e.preventDefault();
-  exportFresh();
-});
+      const eventsGrid=[ snap.headersOut, ...snap.outRows.map(r => snap.headersOut.map(h => r[h] ?? "")) ];
+      const lists=computeLists(snap.headersOut, snap.outRows);
+      const headers=["room","room in TS","", "owners","owners in TS","", "status","", "unmatched_rooms","unmatched_owners","unmatched_status","appended_headers"];
+      const len=Math.max(lists.rooms.length, lists.owners.length, lists.statuses.length, lists.nonMatched.length, 1);
+      const listGrid=[headers];
+      for(let i=0;i<len;i++){ const A=lists.rooms[i]||"", D=lists.owners[i]||"", G=lists.statuses[i]||"", L=lists.nonMatched[i]||"";
+        const r=i+2; const I=`=IF(A${r}="","",IF(COUNTIF($B:$B,A${r})>0,"",A${r}))`; const J=`=IF(D${r}="","",IF(COUNTIF($E:$E,D${r})>0,"",D${r}))`; const K=`=IF(G${r}="","",IF(ISNUMBER(MATCH(G${r},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G${r}))`;
+        listGrid.push([A,"","",D,"","",G,"",I,J,K,L]); }
+      await gapiBoot(); const tok=await getToken(); gapi.client.setToken({access_token:tok});
+      const sheetName=(document.getElementById('sheetName')?.value||'Events').trim()||'Events';
+      const fileName=((document.getElementById('fileName')?.value||'master_output').trim()||'master_output').replace(/\s+/g,'_')+' (Google Sheet)';
+      const id=await driveCopy(TEMPLATE_ID, fileName); await waitReady(id);
+      await ensureSheet(id, sheetName); await ensureSheet(id, 'Lists');
+      await writeRAW(id, sheetName, eventsGrid); await writeUSER(id, 'Lists', listGrid);
+      window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`,'_blank');
+    }catch(e){ console.error(e); alert('Export failed: '+(e?.result?.error?.message||e.message||String(e))); }
+  }
+})();
 </script>
 
 </body>
