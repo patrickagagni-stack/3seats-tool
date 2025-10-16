@@ -723,5 +723,76 @@ function exportToSheets(){
 )();
 </script>
 
+<!-- ===== Binder Patch: make sure the Export button exists & is wired ===== -->
+<style>
+  #exportToSheetsFloating{position:fixed;right:16px;bottom:16px;z-index:99999;padding:10px 14px;border:0;border-radius:8px;background:#1a73e8;color:#fff;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.2);cursor:pointer}
+  #exportToSheetsFloating:hover{filter:brightness(1.05)}
+</style>
+<script>
+(function(){
+  // 1) If exportToSheets exists but isn't global, expose it
+  try {
+    if (typeof exportToSheets === 'function' && !window.exportToSheets) {
+      window.exportToSheets = exportToSheets;
+    }
+  } catch(_) {}
+
+  function bindExportButtons() {
+    const selectors = ['#exportToSheetsBtn', '#exportBtn', '.btn-export', '#export_to_google'];
+    let found = false;
+
+    selectors.forEach(sel => {
+      document.querySelectorAll(sel).forEach(el => {
+        found = true;
+        if (!el.dataset._exportBound) {
+          el.dataset._exportBound = '1';
+          el.addEventListener('click', function (e) {
+            e.preventDefault();
+            try {
+              console.log('[DBG] Export click via', sel);
+              if (typeof window.exportToSheets === 'function') {
+                window.exportToSheets();
+              } else {
+                alert('Export action not found. (exportToSheets not defined)');
+              }
+            } catch (err) {
+              console.error(err);
+              alert('Export error: ' + (err?.message || String(err)));
+            }
+          });
+        }
+      });
+    });
+
+    // 2) If no obvious button is present, inject a floating one
+    if (!found && !document.getElementById('exportToSheetsFloating')) {
+      const b = document.createElement('button');
+      b.id = 'exportToSheetsFloating';
+      b.type = 'button';
+      b.textContent = 'Export to Google Sheet';
+      b.addEventListener('click', function(){
+        try {
+          if (typeof window.exportToSheets === 'function') {
+            window.exportToSheets();
+          } else {
+            alert('Export action not found. (exportToSheets not defined)');
+          }
+        } catch (err) {
+          console.error(err);
+          alert('Export error: ' + (err?.message || String(err)));
+        }
+      });
+      document.body.appendChild(b);
+      console.log('[DBG] Added floating Export button');
+    }
+  }
+
+  // Bind on load and again after UI builds
+  document.addEventListener('DOMContentLoaded', bindExportButtons);
+  setTimeout(bindExportButtons, 600);
+  setTimeout(bindExportButtons, 1600);
+})();
+</script>
+<!-- ===== /Binder Patch ===== -->
 </body>
 </html>
