@@ -667,14 +667,111 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     return { rooms:[...rooms], owners:[...owners], statuses:unmatched, nonMatched:[] };
   }
 
-  async 
-function exportToSheets(){
-  try{
-    if (!window.__lastXlsxBlob) {
-      alert("Please run your normal Excel export first, then click Export to Google Sheet.");
-      return;
-    }
-    return (async function(){
+  async function exportToSheets(){
+    try{
+      const snap=getData();
+      if(!snap || !snap.headersOut.length || !snap.outRows.length){ alert('No table detected (or no rows). Run Generate first.'); return; }
+      const eventsGrid=[ snap.headersOut, ...snap.outRows.map(r => snap.headersOut.map(h => r[h] ?? "")) ];
+      const lists=computeLists(snap.headersOut, snap.outRows);
+      const headers=["room","room in TS","", "owners","owners in TS","", "status","", "unmatched_rooms","unmatched_owners","unmatched_status","appended_headers"];
+      const len=Math.max(lists.rooms.length, lists.owners.length, lists.statuses.length, lists.nonMatched.length, 1);
+      const listGrid=[headers];
+      for(let i=0;i<len;i++){ const A=lists.rooms[i]||"", D=lists.owners[i]||"", G=lists.statuses[i]||"", L=lists.nonMatched[i]||"";
+        const r=i+2; const I=`=IF(A${r}="","",IF(COUNTIF($B:$B,A${r})>0,"",A${r}))`; const J=`=IF(D${r}="","",IF(COUNTIF($E:$E,D${r})>0,"",D${r}))`; const K=`=IF(G${r}="","",IF(ISNUMBER(MATCH(G${r},{"Prospect","Tentative","Definite","Closed","Lost"},0)),"",G${r}))`;
+        listGrid.push([A,"","",D,"","",G,"",I,J,K,L]); }
+      await gapiBoot(); const tok=await getToken(); gapi.client.setToken({access_token:tok});
+      const sheetName=(document.getElementById('sheetName')?.value||'Events').trim()||'Events';
+      const fileName=((document.getElementById('fileName')?.value||'master_output').trim()||'master_output').replace(/\s+/g,'_')+' (Google Sheet)';
+      const id=await driveCopy(TEMPLATE_ID, fileName); await waitReady(id);
+      await ensureSheet(id, sheetName); await ensureSheet(id, 'Lists');
+      await writeRAW(id, sheetName, eventsGrid); await writeUSER(id, 'Lists', listGrid);
+      window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`,'_blank');
+    }catch(e){ console.error(e); alert('Export failed: '+(e?.result?.error?.message||e.message||String(e))); }
+  }
+})();
+</script>
+
+
+<!-- ==== 3seats: resilient Excel capture + Sheets export (incognito-proof) ==== -->
+<script async defer src="https://apis.google.com/js/api.js"></script>
+<script async defer src="https://accounts.google.com/gsi/client"></script>
+<script>
+(function(){
+  (function ensureExcelCapture(){
+    try {
+      const _origSaveAs = window.saveAs;
+      window.saveAs = function(blob, name, opts){
+        try {
+          if (blob && (blob.type?.includes("spreadsheetml") || /\.xlsx$/i.test(name||""))) {
+            window.__lastXlsxBlob = blob;
+            window.__lastXlsxName = name || "master_output.xlsx";
+            console.log("[3seats] Captured Excel via saveAs:", window.__lastXlsxName, blob?.size||0, "bytes");
+          }
+        } catch(e) { console.warn(e); }
+        return _origSaveAs ? _origSaveAs(blob, name, opts) : null;
+      };
+    } catch(e) { console.warn("saveAs capture failed", e); }
+
+    const patchExcelJS = () => {
+      try{
+        if (window.ExcelJS && ExcelJS.Workbook && ExcelJS.Workbook.prototype && ExcelJS.Workbook.prototype.xlsx){
+          const proto = ExcelJS.Workbook.prototype.xlsx;
+          if (typeof proto.writeBuffer === "function" && !proto.writeBuffer.__patched){
+            const origWB = proto.writeBuffer;
+            proto.writeBuffer = async function(){
+              const buffer = await origWB.apply(this, arguments);
+              try {
+                const blob = new Blob([buffer], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+                window.__lastXlsxBlob = blob;
+                window.__lastXlsxName = window.__lastXlsxName || "master_output.xlsx";
+                console.log("[3seats] Captured Excel via ExcelJS.writeBuffer:", blob.size, "bytes");
+              } catch(e) { console.warn(e); }
+              return buffer;
+            };
+            proto.writeBuffer.__patched = true;
+          }
+          if (typeof proto.writeFile === "function" && !proto.writeFile.__patched){
+            const origWF = proto.writeFile;
+            proto.writeFile = async function(fileName){
+              const res = await origWF.apply(this, arguments);
+              try {
+                window.__lastXlsxName = fileName || window.__lastXlsxName || "master_output.xlsx";
+                console.log("[3seats] ExcelJS.writeFile called:", window.__lastXlsxName);
+              } catch(e) { console.warn(e); }
+              return res;
+            };
+            proto.writeFile.__patched = true;
+          }
+        }
+      }catch(e){ console.warn("ExcelJS patch failed", e); }
+    };
+    patchExcelJS();
+    setTimeout(patchExcelJS, 600);
+    setTimeout(patchExcelJS, 1500);
+  })();
+
+  window.exportToSheets = async function exportToSheets(){
+    try{
+      let xlsxBlob = window.__lastXlsxBlob || null;
+      let fileName = window.__lastXlsxName || ((document.getElementById("fileName")?.value || "master_output").trim() || "master_output") + ".xlsx";
+
+      if (!xlsxBlob){
+        const picked = await new Promise((resolve)=>{
+          const inp = document.createElement('input');
+          inp.type = 'file'; inp.accept = ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+          inp.style.position = 'fixed'; inp.style.left = '-9999px';
+          document.body.appendChild(inp);
+          inp.addEventListener('change', ()=> resolve(inp.files && inp.files[0] ? inp.files[0] : null));
+          inp.click();
+        });
+        if (!picked){ alert("No Excel selected. Please run your Excel export first, or choose the file when prompted."); return; }
+        xlsxBlob = picked;
+        fileName = picked.name || fileName;
+        window.__lastXlsxBlob = xlsxBlob;
+        window.__lastXlsxName = fileName;
+        console.log("[3seats] Using picked Excel file:", fileName, xlsxBlob.size, "bytes");
+      }
+
       await new Promise((resolve,reject)=>{ gapi.load("client", async ()=>{ try{ await gapi.client.init({}); resolve(); }catch(e){ reject(e); } }); });
       await gapi.client.load("https://www.googleapis.com/discovery/v1/apis/drive/v3/rest");
       await gapi.client.load("https://sheets.googleapis.com/$discovery/rest?version=v4");
@@ -692,16 +789,16 @@ function exportToSheets(){
       gapi.client.setToken({access_token: accessToken});
 
       const TEMPLATE_ID = "1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
-      const fileName = ((document.getElementById("fileName")?.value || "master_output").trim()||"master_output").replace(/\s+/g,"_") + " (Google Sheet)";
+      const baseName = ((document.getElementById("fileName")?.value || "master_output").trim()||"master_output").replace(/\s+/g,"_");
+      const gsName = baseName + " (Google Sheet)";
       const copyRes = await gapi.client.drive.files.copy({
-        fileId: TEMPLATE_ID, supportsAllDrives: true, fields: "id", resource: { name: fileName }
+        fileId: TEMPLATE_ID, supportsAllDrives: true, fields: "id", resource: { name: gsName }
       });
       const destSpreadsheetId = copyRes.result.id;
 
       async function waitReady(id){
         for (let i=1;i<=10;i++){
-          try { const r = await gapi.client.sheets.spreadsheets.get({ spreadsheetId:id, fields:"spreadsheetId" }); if (r?.result?.spreadsheetId) return; }
-          catch(_){}
+          try { const r = await gapi.client.sheets.spreadsheets.get({ spreadsheetId:id, fields:"spreadsheetId" }); if (r?.result?.spreadsheetId) return; } catch(_){}
           await new Promise(r=>setTimeout(r, 300*i));
         }
         throw new Error("Sheet not ready.");
@@ -726,7 +823,7 @@ function exportToSheets(){
         });
         return res.result.id;
       }
-      const sourceSpreadsheetId = await uploadAndConvertXlsx(window.__lastXlsxBlob, fileName);
+      const sourceSpreadsheetId = await uploadAndConvertXlsx(xlsxBlob, baseName);
 
       async function getSheetList(id){
         const res = await gapi.client.sheets.spreadsheets.get({ spreadsheetId:id, fields:"sheets(properties(sheetId,title,index))" });
@@ -755,47 +852,14 @@ function exportToSheets(){
       }
 
       window.open(`https://docs.google.com/spreadsheets/d/${destSpreadsheetId}/edit`, "_blank");
-    })();
-  }catch(e){
-    console.error(e);
-    alert("Export failed: " + (e?.result?.error?.message || e.message || String(e)));
-  }
-}
-
-})();
-</script>
-
-
-<script>
-(function(){
-  const _origSaveAs = window.saveAs;
-  window.saveAs = function(blob, name, opts){
-    try{
-      if (blob && blob.type && blob.type.indexOf("spreadsheetml") !== -1) {
-        window.__lastXlsxBlob = blob;
-      }
-    }catch(_){}
-    return _origSaveAs ? _origSaveAs(blob, name, opts) : null;
+    }catch(e){
+      console.error(e);
+      alert("Export failed: " + (e?.result?.error?.message || e.message || String(e)));
+    }
   };
 })();
 </script>
+<!-- ==== /3seats patch ==== -->
 
-<script>window.exportToSheets = exportToSheets;</script>
-<!-- Capture the Excel blob whenever your existing code downloads it via FileSaver.saveAs -->
-<script>
-(function(){
-  // If FileSaver.saveAs is used anywhere to download the .xlsx, capture that blob for Sheets export
-  const origSaveAs = window.saveAs;
-  window.saveAs = function(blob, name, opts){
-    try {
-      if (blob && blob.type && /spreadsheetml/i.test(blob.type)) {
-        window.__lastXlsxBlob = blob;                 // <-- This is what exportToSheets needs
-        console.log('[3seats] Excel blob captured:', blob.size, 'bytes');
-      }
-    } catch (e) { /* ignore */ }
-    return origSaveAs ? origSaveAs(blob, name, opts) : null;
-  };
-})();
-</script>
 </body>
 </html>
