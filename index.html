@@ -781,5 +781,21 @@ function exportToSheets(){
 </script>
 
 <script>window.exportToSheets = exportToSheets;</script>
+<!-- Capture the Excel blob whenever your existing code downloads it via FileSaver.saveAs -->
+<script>
+(function(){
+  // If FileSaver.saveAs is used anywhere to download the .xlsx, capture that blob for Sheets export
+  const origSaveAs = window.saveAs;
+  window.saveAs = function(blob, name, opts){
+    try {
+      if (blob && blob.type && /spreadsheetml/i.test(blob.type)) {
+        window.__lastXlsxBlob = blob;                 // <-- This is what exportToSheets needs
+        console.log('[3seats] Excel blob captured:', blob.size, 'bytes');
+      }
+    } catch (e) { /* ignore */ }
+    return origSaveAs ? origSaveAs(blob, name, opts) : null;
+  };
+})();
+</script>
 </body>
 </html>
