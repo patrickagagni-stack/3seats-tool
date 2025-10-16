@@ -4,7 +4,22 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Event Data Import Tool</title>
-  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js">
+
+
+// === Added: Lossless matrix reader for Sheets export (preserves columns beyond Z) ===
+function readWorksheetMatrix(ws) {
+  // Produce a 2D array preserving blanks, types, and far-right columns
+  let rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false });
+  const width = rows.reduce((m, r) => Math.max(m, r.length), 0);
+  rows = rows.map(r => (r.length === width ? r : [...r, ...Array(width - r.length).fill("")]));
+  if (rows.length === 0) rows = [[]];
+  rows[0] = rows[0].map((h, i) => (String(h || "").trim() ? String(h) : `Column_${i + 1}`));
+  return rows;
+}
+
+
+</script>
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
   <style>
     :root{ --bg:#0b1020; --panel:#141a2f; --muted:#b7c4ff; --text:#f5f8ff; --warn:#ffb020; --err:#ff6b6b; --ok:#32d583; }
@@ -168,22 +183,7 @@
     function log(kind,msg){ const el=$('exportMsg'); if(!el) return; el.className=kind; el.textContent=msg; }
 
     function dedupeHeaders(arr){ const seen=new Map(); return arr.map(h=>{ let base=(h||'').trim()||'Column'; let key=base.toLowerCase(); if(!seen.has(key)){ seen.set(key,1); return base; } const n=seen.get(key); seen.set(key,n+1); return base+'_'+(n+1); }); }
-    function getHeadersFromSheet(ws){ const range=ws['!ref']?XLSX.utils.decode_range(ws['!ref']):null;
-
-
-// === Added: Lossless matrix reader for Sheets export ===
-function readWorksheetMatrix(ws) {
-  // 2D array preserving blanks & long-right columns
-  let rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false });
-  const width = rows.reduce((m, r) => Math.max(m, r.length), 0);
-  rows = rows.map(r => (r.length === width ? r : [...r, ...Array(width - r.length).fill("")]));
-  if (rows.length === 0) rows = [[]];
-  rows[0] = rows[0].map((h, i) => (String(h || "").trim() ? String(h) : `Column_${i + 1}`));
-  return rows;
-}
-
-
- if(!range) return []; const headers=[]; const R=range.s.r; for(let C=range.s.c; C<=range.e.c; ++C){ const cell=ws[XLSX.utils.encode_cell({r:R,c:C})]; let hdr=cell?String(cell.v).trim():''; headers.push(hdr);} while(headers.length && !headers[headers.length-1]) headers.pop(); return headers; }
+    function getHeadersFromSheet(ws){ const range=ws['!ref']?XLSX.utils.decode_range(ws['!ref']):null; if(!range) return []; const headers=[]; const R=range.s.r; for(let C=range.s.c; C<=range.e.c; ++C){ const cell=ws[XLSX.utils.encode_cell({r:R,c:C})]; let hdr=cell?String(cell.v).trim():''; headers.push(hdr);} while(headers.length && !headers[headers.length-1]) headers.pop(); return headers; }
     function norm(str){ let s=String(str||'').toLowerCase(); s=s.replace(/[_-]+/g,' ').trim().replace(/\s+/g,' '); return s; }
     function squish(str){ return norm(str).replace(/\s+/g,''); }
     function guessMatch(masterHdr,chs){ const t=norm(masterHdr), ts=squish(masterHdr); let hit=chs.find(h=>norm(h)===t)||chs.find(h=>squish(h)===ts)||chs.find(h=>squish(h).includes(ts)||ts.includes(squish(h))); return hit||''; }
@@ -538,13 +538,14 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
       try{
         const data=new Uint8Array(reader.result);
         const wb=XLSX.read(data,{type:'array'});
-        const ws=wb.Sheets[wb.SheetNames[0]];
+        const sheetName = wb.SheetNames[0];
+        const ws=wb.Sheets[sheetName];
 
-        // Build a full rectangular matrix (preserve blanks & far-right columns)
+        // Build full rectangular matrix for lossless export
         const matrix = readWorksheetMatrix(ws);
         customer.matrix = matrix;
 
-        // Maintain object-view for existing UI previews/mapping
+        // Preserve existing UI behavior: headers/rows object-view for mapping/preview
         const headers = matrix[0];
         const body = matrix.slice(1);
         customer.headers = headers.map(h => String(h || '').trim());
@@ -553,14 +554,16 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
           return o;
         });
 
-        customer.sourceKey=`${f.name}|${wb.SheetNames[0]}|${customer.headers.join(',')}`.slice(0,500);
+        customer.sourceKey=`${f.name}|${sheetName}|${customer.headers.join(',')}`.slice(0,500);
         const meta=$('customerMeta');
-        meta.style.display='flex';
-        meta.innerHTML='';
-        meta.appendChild(pill(`File: ${f.name}`));
-        meta.appendChild(pill(`Sheet: ${wb.SheetNames[0]}`));
-        meta.appendChild(pill(`${customer.headers.length} columns`));
-        meta.appendChild(pill(`${customer.rows.length} rows`));
+        if(meta){
+          meta.style.display='flex';
+          meta.innerHTML='';
+          meta.appendChild(pill(`File: ${f.name}`));
+          meta.appendChild(pill(`Sheet: ${sheetName}`));
+          meta.appendChild(pill(`${customer.headers.length} columns`));
+          meta.appendChild(pill(`${customer.rows.length} rows`));
+        }
         updateUIAfterLoad();
       }catch(err){ log('danger','Failed to read file: '+(err&&err.message?err.message:String(err))); }
     };
@@ -674,12 +677,12 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
   function norm(s){ return String(s||'').toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim(); }
 
   
+// === Added: Matrix-first data getter (lossless) ===
 function getDataMatrix(){
-  // 1) Prefer the full rectangular matrix built at load time
   if (typeof customer !== 'undefined' && customer && Array.isArray(customer.matrix) && customer.matrix.length){
     return { matrix: customer.matrix, source: 'matrix' };
   }
-  // 2) Fallback: scrape DOM table into a rectangular matrix
+  // DOM fallback: scrape visible table into a matrix
   const t=document.querySelector('table'); if(!t) return null;
   const thead=t.querySelector('thead'), tbody=t.querySelector('tbody');
   let headers=[]; if (thead) headers = Array.from(thead.querySelectorAll('th,td')).map(x=>x.textContent.trim());
@@ -733,6 +736,7 @@ function getDataMatrix(){
 
   async function exportToSheets(){
   try{
+    // Lossless data snapshot
     const snap = getDataMatrix();
     if(!snap || !snap.matrix || snap.matrix.length < 2){
       alert('No table detected (or no rows).');
@@ -745,20 +749,25 @@ function getDataMatrix(){
       return o;
     });
 
+    // Your existing list builder (unchanged expectation)
     const lists = computeLists(headersOut, outRows);
+
+    // Names from UI
     const sheetName=(document.getElementById('sheetName')?.value||'Events').trim()||'Events';
     const fileName=((document.getElementById('fileName')?.value||'master_output').trim()||'master_output').replace(/\s+/g,'_')+' (Google Sheet)';
 
+    // Auth and template copy
     await gapiBoot(); const tok=await getToken(); gapi.client.setToken({access_token:tok});
     const id=await driveCopy(TEMPLATE_ID, fileName); await waitReady(id);
 
+    // Ensure tabs exist
     await ensureSheet(id, sheetName);
     await ensureSheet(id, 'Lists');
 
-    // Write the full rectangle from A1
+    // Write full rectangle (A1 origin; Sheets expands as needed)
     await writeRAW(id, sheetName, eventsGrid);
 
-    // Build & write Lists (unchanged)
+    // Build & write Lists tab
     const headers=["room","room in TS","", "owners","owners in TS","", "status","", "unmatched_rooms","unmatched_owners","unmatched_status","appended_headers"];
     const len=Math.max(lists.rooms.length, lists.owners.length, lists.statuses.length, lists.nonMatched.length, 1);
     const listGrid=[headers];
@@ -772,6 +781,7 @@ function getDataMatrix(){
     }
     await writeUSER(id, 'Lists', listGrid);
 
+    // Open the new Google Sheet
     window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`,'_blank');
   }catch(e){
     console.error(e);
