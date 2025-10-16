@@ -532,6 +532,9 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 
     function handleFile(f){
     if(!window.XLSX){ log('danger','Excel parser not loaded.'); return; }
+
+// Expose globally for diagnostic uploader
+try{ window.handleFile = handleFile; }catch(_){}
     const reader=new FileReader();
     reader.onload=()=>{
       try{
@@ -647,6 +650,16 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 <script async="" defer="" src="https://accounts.google.com/gsi/client"></script>
 <script>
 (function(){
+  // Wait for DOM ready and handleFile availability
+  document.addEventListener('DOMContentLoaded', function(){
+    var wait = setInterval(function(){
+      if (typeof window.handleFile === 'function'){
+        try{ document.getElementById('diagStatus').textContent = 'Uploader ready'; }catch(_){}
+        clearInterval(wait);
+      }
+    }, 250);
+  });
+
   const CLIENT_ID="7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com";
   const TEMPLATE_ID="1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
   const SCOPES="https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets";
@@ -808,6 +821,16 @@ function getDataMatrix(){
 
 <script>
 (function(){
+  // Wait for DOM ready and handleFile availability
+  document.addEventListener('DOMContentLoaded', function(){
+    var wait = setInterval(function(){
+      if (typeof window.handleFile === 'function'){
+        try{ document.getElementById('diagStatus').textContent = 'Uploader ready'; }catch(_){}
+        clearInterval(wait);
+      }
+    }, 250);
+  });
+
   function diagLog(msg, color){
     var el = document.getElementById('diagStatus');
     if(el){ el.textContent = msg; el.style.color = color || '#0a0'; }
@@ -830,6 +853,16 @@ function getDataMatrix(){
         handleFile(f);
         // Poll for meta update to confirm load success
         setTimeout(function(){
+  // Wait for DOM ready and handleFile availability
+  document.addEventListener('DOMContentLoaded', function(){
+    var wait = setInterval(function(){
+      if (typeof window.handleFile === 'function'){
+        try{ document.getElementById('diagStatus').textContent = 'Uploader ready'; }catch(_){}
+        clearInterval(wait);
+      }
+    }, 250);
+  });
+
           try{
             var meta = document.getElementById('customerMeta');
             if (meta && meta.textContent && meta.textContent.trim().length){
