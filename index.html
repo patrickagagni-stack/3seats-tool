@@ -667,11 +667,38 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     return { rooms:[...rooms], owners:[...owners], statuses:unmatched, nonMatched:[] };
   }
 
-  async function exportToSheets(){
+  async 
+function exportToSheets(){
     try{
-      const snap=getData();
-      if(!snap || !snap.headersOut.length || !snap.outRows.length){ alert('No table detected (or no rows). Run Generate first.'); return; }
-      const eventsGrid=[ snap.headersOut, ...snap.outRows.map(r => snap.headersOut.map(h => r[h] ?? "")) ];
+      if(!customer.rows.length){ alert('No table detected (or no rows). Run Generate first.'); return; }
+      const mappingRows=Array.from(document.querySelectorAll('#mappingRows .mapping-row'));
+      try{ if(STATUS_MAP_ENABLED){ STATUS_MAP=Object.assign({}, STATUS_MAP, collectStatusMap()); } }catch(_){ }
+      try{ OWNER_MAP=Object.assign({}, collectOwnerMap()); }catch(_){ }
+      try{ ROOM_MAP=Object.assign({}, collectRoomMap()); }catch(_){ }
+      function headerKeyFromLabel(el){ if(el && el.firstChild && el.firstChild.nodeType===1) { const m=el.firstChild.textContent||''; return m.replace('required','').trim(); } return (el.textContent||'').replace('required','').trim(); }
+      const used=new Set(); mappingRows.forEach(row=>{ const sel=row.children[1]; if(sel&&sel.value) used.add(sel.value);});
+      const append=$('appendExtras')?.checked; const extras=append? customer.headers.filter(h=>h && !used.has(h)):[].sort((a,b)=>a.localeCompare(b));
+      const headersOut=[...master.headers, ...extras];
+      const outRows=[];
+      const applyOwnerMap = ownerMappingIsActive();
+      const applyRoomMap = roomMappingIsActive();
+      for(const srcRow of customer.rows){
+        const out={};
+        mappingRows.forEach(row=>{
+          const labelEl=row.children[0]; const sel=row.children[1]; const transform=row.children[2]?.dataset||null;
+          const key=headerKeyFromLabel(labelEl);
+          let value='';
+          if(sel && sel.value){ value=srcRow[sel.value]; }
+          if(key==='room'){ value = applyRoomMap ? canonicalizeRoomValue(value) : value; }
+          if(key==='status'){ if(STATUS_MAP_ENABLED) value=canonicalizeStatus(value); }
+          if(key==='owner'){ value = applyOwnerMap ? canonicalizeOwner(value, OWNER_MAP) : value; }
+          out[key]=value;
+        });
+        extras.forEach(h=>{ out[h]=srcRow[h]; });
+        outRows.push(out);
+      }
+      const eventsGrid=[ headersOut, ...outRows.map(r => headersOut.map(h => r[h] ?? "")) ];
+
       const lists=computeLists(snap.headersOut, snap.outRows);
       const headers=["room","room in TS","", "owners","owners in TS","", "status","", "unmatched_rooms","unmatched_owners","unmatched_status","appended_headers"];
       const len=Math.max(lists.rooms.length, lists.owners.length, lists.statuses.length, lists.nonMatched.length, 1);
@@ -689,6 +716,11 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     }catch(e){ console.error(e); alert('Export failed: '+(e?.result?.error?.message||e.message||String(e))); }
   }
 })();
+</script>
+
+</body>
+</html>
+)();
 </script>
 
 </body>
