@@ -42,6 +42,20 @@
     .toast{position:fixed;right:16px;bottom:16px;padding:10px 12px;border-radius:10px;background:#122048;border:1px solid #2b3761;color:#e7ecff;box-shadow:0 6px 30px #000a;display:none}
     .visually-hidden{position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none}
   </style>
+<script>
+function setStatusBanner(msg){
+  try {
+    let b = document.getElementById("export-status-banner");
+    if(!b){
+      b = document.createElement("div");
+      b.id = "export-status-banner";
+      b.style.cssText = "position:fixed;bottom:12px;left:12px;background:#111827;color:#fff;padding:8px 10px;border-radius:8px;font:12px/1.4 ui-sans-serif,system-ui;z-index:99999;";
+      document.body.appendChild(b);
+    }
+    b.textContent = msg;
+  } catch(e){ console.log("[3seats-export] status:", msg); }
+}
+</script>
 </head>
 <body>
   <header>
@@ -816,8 +830,29 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
   }
 
   async function exportNow(){
+    try {
+      // 0) Ask for Excel FIRST so user sees progress before OAuth dialog
+      const picked = await new Promise((resolve)=>{
+        const inp = document.createElement('input');
+        inp.type = 'file';
+        inp.accept = ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        inp.style.position = 'fixed'; inp.style.left = '-9999px';
+        document.body.appendChild(inp);
+        inp.addEventListener('change', ()=> resolve(inp.files && inp.files[0] ? inp.files[0] : null));
+        inp.click();
+      });
+      if (!picked){ alert("Export canceled (no Excel selected)."); return; }
+      console.log("[3seats-export] Picked file:", picked && picked.name);
+    } catch (err) {
+      console.error("[3seats-export] File pick failed", err);
+      alert("Could not open file picker. " + (err?.message||String(err)));
+      return;
+    }
+
     try{
+      setStatusBanner('Loading Google APIs…');
       await ensureGapi();
+      setStatusBanner('Authorizing with Google…');
       const token = await ensureToken();
       gapi.client.setToken({access_token: token});
 
@@ -838,6 +873,7 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
       if (!picked){ alert("Export canceled (no Excel selected)."); return; }
 
       // Copy template destination
+      setStatusBanner('Copying your template…');
       const copyRes = await gapi.client.drive.files.copy({
         fileId: TEMPLATE_ID, supportsAllDrives: true, fields: "id", resource: { name: baseName + " (Google Sheet)" }
       });
@@ -852,6 +888,7 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
       const form = new FormData();
       form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
       form.append("file", picked, (picked && picked.name) ? picked.name : (baseName + ".xlsx"));
+      setStatusBanner('Uploading & converting Excel…');
       const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
         method: "POST", headers: { "Authorization": "Bearer " + accessToken }, body: form
       });
@@ -860,6 +897,7 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
       const convertedId = json.id;
 
       // Detect source sheet titles
+      setStatusBanner('Analyzing converted sheets…');
       const meta = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: convertedId, fields: "sheets(properties(title))" });
       const titles = (meta.result.sheets || []).map(s => s.properties.title);
       const eventsTitle = findTitle(titles, ["Events","Event","Sheet1"]);
@@ -871,6 +909,7 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 
       // Events: values only
       if (eventsTitle){
+        setStatusBanner('Writing Events (values)…');
         const eventsGrid = await readValues(convertedId, eventsTitle);
         await clearValues(destId, "Events");
         await writeValues(destId, "Events", eventsGrid);
@@ -880,6 +919,7 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 
       // Lists: formulas preserved
       if (listsTitle){
+        setStatusBanner('Writing Lists (formulas)…');
         const listsRows = await readCellsWithFormulas(convertedId, listsTitle);
         await writeCellsWithFormulas(destId, "Lists", listsRows);
       } else {
@@ -887,7 +927,9 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
       }
 
       // Open result
+      setStatusBanner('Opening Google Sheet…');
       window.open(`https://docs.google.com/spreadsheets/d/${destId}/edit`, "_blank");
+      setStatusBanner('Done — Sheet opened.');
     }catch(e){
       console.error(e);
       const msg = e?.result?.error?.message || e.message || String(e);
