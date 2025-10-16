@@ -780,5 +780,59 @@ function exportToSheets(){
 </script>
 
 <script>window.exportToSheets = exportToSheets;</script>
+<!-- Minimal, no-UI-change binder for the Google Sheet export -->
+<script async defer src="https://apis.google.com/js/api.js"></script>
+<script async defer src="https://accounts.google.com/gsi/client"></script>
+<script>
+(function(){
+  // Try to attach your exporter function if it exists after scripts load.
+  function exposeExporter(){
+    try {
+      // If your code defined exportToSheets as a local function, this surfaces it globally
+      if (typeof window.exportToSheets !== 'function' && typeof exportToSheets === 'function') {
+        window.exportToSheets = exportToSheets;
+        console.log('[Binder] exportToSheets exposed globally.');
+      }
+    } catch(_) {}
+  }
+
+  function wireButton(){
+    // Use your existing button; we won't add another one
+    var btn = document.querySelector('#exportBtn, #export_to_google, .btn-export, #exportToSheetsBtn');
+    if (!btn) return; // If your UI shows the button later, we’ll re-run wiring below
+    if (btn.dataset._wired) return;
+
+    btn.dataset._wired = '1';
+    btn.addEventListener('click', function(e){
+      e.preventDefault();
+      exposeExporter();
+
+      if (typeof window.exportToSheets !== 'function') {
+        alert('Exporter not found on this page. (exportToSheets is undefined)');
+        return;
+      }
+      if (!window.__lastXlsxBlob) {
+        // This ensures we export the exact workbook with ALL columns/formatting
+        alert('Please run your normal Excel export first, then click Export to Google Sheet.');
+        return;
+      }
+      try {
+        window.exportToSheets();
+      } catch (err) {
+        console.error(err);
+        alert('Export failed: ' + (err?.message || String(err)));
+      }
+    });
+  }
+
+  // Run once DOM is ready, then again shortly after (in case your UI renders late)
+  document.addEventListener('DOMContentLoaded', function(){
+    exposeExporter();
+    wireButton();
+    setTimeout(function(){ exposeExporter(); wireButton(); }, 500);
+    setTimeout(function(){ exposeExporter(); wireButton(); }, 1500);
+  });
+})();
+</script>
 </body>
 </html>
