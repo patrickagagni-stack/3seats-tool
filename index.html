@@ -1,10 +1,11 @@
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Event Data Import Tool</title>
-  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js">
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>Event Data Import Tool</title>
+<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js">
 
 
 // === Added: Lossless matrix reader for Sheets export (preserves columns beyond Z) ===
@@ -20,8 +21,8 @@ function readWorksheetMatrix(ws) {
 
 
 </script>
-  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <style>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<style>
     :root{ --bg:#0b1020; --panel:#141a2f; --muted:#b7c4ff; --text:#f5f8ff; --warn:#ffb020; --err:#ff6b6b; --ok:#32d583; }
     *{box-sizing:border-box}
     body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text)}
@@ -59,114 +60,112 @@ function readWorksheetMatrix(ws) {
   </style>
 </head>
 <body>
-  <header>
-    <h1>Event Data Import Tool</h1>
-    <div class="hint" style="margin-top:6px">Upload/Preview, Field Mapping, Rooms, optional Status, Room & Owner mapping, and Export.</div>
-    <div class="hint" style="margin-top:4px">Last updated: October 2, 2025</div>
-  </header>
+<div id="diag-uploader" style="position:sticky;top:0;z-index:9999;background:#fff;border-bottom:1px solid #ddd;padding:12px;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+<strong>Direct Upload (Diagnostic)</strong> — If the normal upload isn't kicking in, use this:
+  <input accept=".xlsx,.xls,.csv" id="diagnosticFileInput" style="margin-left:12px;padding:6px;border:1px solid #ddd;" type="file"/>
+<button id="diagExportBtn" style="margin-left:8px;padding:6px 10px;border:1px solid #ddd;background:#f5f5f5;cursor:pointer;">Export to Google Sheet (Diag)</button>
+<span id="diagStatus" style="margin-left:12px;color:#0a0"></span>
+</div>
 
-  <main class="grid">
-    <section class="card"><h2>1) Upload Customer Data (Excel/CSV)</h2><div class="content grid" style="gap:10px">
-      <div id="drop" class="dropzone" tabindex="0" role="button" aria-label="Upload customer file">Drop file here or click to browse
-        <input id="overlayPicker" type="file" accept=".xlsx,.xls,.csv" aria-hidden="true" style="position:absolute;inset:0;opacity:0;cursor:pointer" />
-      </div>
-      <input id="customerFile" type="file" accept=".xlsx,.xls,.csv" class="visually-hidden" />
-      <div class="row wrap" id="customerMeta" style="display:none;gap:8px"></div>
-      <div class="row wrap" style="gap:8px;margin-top:8px"><span class="pill">Preview rows: <span id="previewCount">0</span></span><button class="btn" id="togglePreview" disabled>Show Preview</button></div>
-      <div id="preview" style="display:none;margin-top:10px;max-height:300px;overflow:auto"><table id="previewTable"></table></div>
-    </div></section>
-
-    <section class="card"><h2>2) Map Fields</h2><div class="content">
-      <div class="notice" id="mappingNotice">Columns marked <span class="pill required">required</span> allow a default that is used only if the source is blank. Off-site fields are marked with <span class="pill offsite">Off-Site</span>.</div>
-      <div id="mappingArea" style="display:none" class="grid">
-        <div class="mapping-row" style="font-size:12px;color:#8ea0dc;margin-bottom:4px"><div>Master Header</div><div>Source (Customer Field)</div><div>Format Conversions (As Needed)</div><div>Default / Constant</div></div>
-        <div id="mappingRows" class="grid" style="gap:8px"></div>
-      </div>
-      <div class="row wrap" style="gap:8px;margin-top:10px">
-        <button class="btn" id="saveMapping" type="button">Save Mapping</button>
-        <button class="btn" id="loadMapping" type="button">Load Mapping</button>
-      </div>
-    </div></section>
-
-    <section class="card"><h2>3) Rooms summary</h2><div class="content">
-      <div class="row wrap">
-        <span class="pill">Unique rooms: <span id="roomsCount">0</span></span>
-        <label class="rooms-input"><span class="hint">Room separator characters</span><input id="roomSeps" type="text" value=",/;|:" /></label>
-        <button class="btn" id="refreshRooms">Refresh</button>
-        <button class="btn" id="copyRooms">Copy list</button>
-      </div>
-      <div class="rooms-wrap" id="roomsList" style="margin-top:8px"></div>
-    </div></section>
-
-    <section class="card"><h2>4) Status mapping</h2><div class="content">
-      <div class="notice">Optional. If disabled, statuses export unchanged.</div>
-      <div class="row wrap" style="gap:8px;margin-bottom:8px"><button class="btn" id="toggleStatusMap">Enable status mapping</button><span class="hint">Collapsed by default</span></div>
-      <div id="statusMapArea" style="display:none">
-        <div class="row wrap" style="gap:8px;align-items:flex-end;margin-bottom:10px">
-          <label style="min-width:260px">
-            <span class="hint">Default canonical status for all (optional)</span>
-            <select id="statusDefault">
-              <option value="">— No default —</option>
-              <option value="Prospect">Prospect</option>
-              <option value="Tentative">Tentative</option>
-              <option value="Definite">Definite</option>
-              <option value="Closed">Closed</option>
-              <option value="Lost">Lost</option>
-            </select>
-          </label>
-          <button class="btn" id="applyStatusDefaultAll" type="button">Apply default to all</button>
-        </div>
-        <div class="hint" style="margin-bottom:8px">Detected statuses (left) → Canonical (right)</div>
-        <div id="statusMapRows" class="grid" style="gap:8px"></div>
-        <div class="row wrap" style="gap:8px;margin-top:8px"><button class="btn" id="saveStatusMap">Save Status Mapping</button><button class="btn" id="loadStatusMap">Load Status Mapping</button></div>
-      </div>
-    </div></section>
-
-    <section class="card"><h2>5) Room mapping</h2><div class="content">
-      <div class="notice">Optional. If disabled, room values export unchanged.</div>
-      <div class="row wrap" style="gap:8px;margin-bottom:8px"><button class="btn" id="toggleRoomMap">Enable room mapping</button><span class="hint">Uses Excel-like Find & Replace</span></div>
-      <div id="roomMapArea" style="margin-top:10px; display:none">
-        <div class="hint" style="margin-bottom:8px">Detected rooms (left) → Action (right)</div>
-        <div id="roomMapRows" class="grid" style="gap:8px"></div>
-      </div>
-    </div></section>
-
-    <section class="card"><h2>6) Owner mapping</h2><div class="content">
-      <div class="notice">Optional. If disabled, owners export unchanged.</div>
-      <div class="row wrap" style="gap:8px;margin-bottom:8px"><button class="btn" id="toggleOwnerMap">Enable owner mapping</button><span class="hint">Collapsed by default</span></div>
-      <div id="ownerMapArea" style="margin-top:10px; display:none">
-        <div class="hint" style="margin-bottom:8px">Detected owners (left) → Action (right)</div>
-        <div id="ownerMapRows" class="grid" style="gap:8px"></div>
-      </div>
-    </div></section>
-
-    <section class="card"><h2>7) Export</h2><div class="content">
-      <div class="row wrap" style="gap:12px">
-        <label><span>Output Sheet Name</span><input id="sheetName" type="text" placeholder="Defaults to Events"/></label>
-        <label><span>File Name</span><input id="fileName" type="text" placeholder="master_output.xlsx"/></label>
-        <label><span>Room Separator <span class="hint">(in most cases should match section 3)</span></span><input id="roomSep" type="text" value=","/></label>
-        <label><span>Replace room separators</span>
-          <div class="row" style="gap:8px">
-            <select id="roomSepMode">
-              <option value="leave" selected>Leave as is</option>
-              <option value="replace">Replace with…</option>
-            </select>
-            <input id="roomSepReplace" type="text" value=", " placeholder=", " disabled />
-          </div>
-        </label>
-        <label><span>Export Format</span><select id="exportFormat"><option value="xlsx" selected>.xlsx (Excel)</option><option value="csv">.csv</option></select></label>
-        <label class="row" style="gap:8px"><input id="appendExtras" type="checkbox" checked/><span class="hint">Append unmatched customer columns</span></label>
-        <label class="row" style="gap:8px"><input id="includeRoomsSheet" type="checkbox" checked/><span class="hint">Include a separate "Lists" sheet</span></label>
-        <button class="btn primary" id="exportBtn" disabled>Generate</button>
-        <button class="btn" id="exportToSheetsBtn" type="button" title="Create a Google Sheet from the current preview/mapping" style="margin-left:8px;">Export to Google Sheet</button>
-      </div>
-      <div id="exportMsg" style="margin-top:10px"></div>
-    </div></section>
-  </main>
-
-  <div id="toast" class="toast"></div>
-
-  <script>
+<header>
+<h1>Event Data Import Tool</h1>
+<div class="hint" style="margin-top:6px">Upload/Preview, Field Mapping, Rooms, optional Status, Room &amp; Owner mapping, and Export.</div>
+<div class="hint" style="margin-top:4px">Last updated: October 2, 2025</div>
+</header>
+<main class="grid">
+<section class="card"><h2>1) Upload Customer Data (Excel/CSV)</h2><div class="content grid" style="gap:10px">
+<div aria-label="Upload customer file" class="dropzone" id="drop" role="button" tabindex="0">Drop file here or click to browse
+        <input accept=".xlsx,.xls,.csv" aria-hidden="true" id="overlayPicker" style="position:absolute;inset:0;opacity:0;cursor:pointer" type="file"/>
+</div>
+<input accept=".xlsx,.xls,.csv" class="visually-hidden" id="customerFile" type="file"/>
+<div class="row wrap" id="customerMeta" style="display:none;gap:8px"></div>
+<div class="row wrap" style="gap:8px;margin-top:8px"><span class="pill">Preview rows: <span id="previewCount">0</span></span><button class="btn" disabled="" id="togglePreview">Show Preview</button></div>
+<div id="preview" style="display:none;margin-top:10px;max-height:300px;overflow:auto"><table id="previewTable"></table></div>
+</div></section>
+<section class="card"><h2>2) Map Fields</h2><div class="content">
+<div class="notice" id="mappingNotice">Columns marked <span class="pill required">required</span> allow a default that is used only if the source is blank. Off-site fields are marked with <span class="pill offsite">Off-Site</span>.</div>
+<div class="grid" id="mappingArea" style="display:none">
+<div class="mapping-row" style="font-size:12px;color:#8ea0dc;margin-bottom:4px"><div>Master Header</div><div>Source (Customer Field)</div><div>Format Conversions (As Needed)</div><div>Default / Constant</div></div>
+<div class="grid" id="mappingRows" style="gap:8px"></div>
+</div>
+<div class="row wrap" style="gap:8px;margin-top:10px">
+<button class="btn" id="saveMapping" type="button">Save Mapping</button>
+<button class="btn" id="loadMapping" type="button">Load Mapping</button>
+</div>
+</div></section>
+<section class="card"><h2>3) Rooms summary</h2><div class="content">
+<div class="row wrap">
+<span class="pill">Unique rooms: <span id="roomsCount">0</span></span>
+<label class="rooms-input"><span class="hint">Room separator characters</span><input id="roomSeps" type="text" value=",/;|:"/></label>
+<button class="btn" id="refreshRooms">Refresh</button>
+<button class="btn" id="copyRooms">Copy list</button>
+</div>
+<div class="rooms-wrap" id="roomsList" style="margin-top:8px"></div>
+</div></section>
+<section class="card"><h2>4) Status mapping</h2><div class="content">
+<div class="notice">Optional. If disabled, statuses export unchanged.</div>
+<div class="row wrap" style="gap:8px;margin-bottom:8px"><button class="btn" id="toggleStatusMap">Enable status mapping</button><span class="hint">Collapsed by default</span></div>
+<div id="statusMapArea" style="display:none">
+<div class="row wrap" style="gap:8px;align-items:flex-end;margin-bottom:10px">
+<label style="min-width:260px">
+<span class="hint">Default canonical status for all (optional)</span>
+<select id="statusDefault">
+<option value="">— No default —</option>
+<option value="Prospect">Prospect</option>
+<option value="Tentative">Tentative</option>
+<option value="Definite">Definite</option>
+<option value="Closed">Closed</option>
+<option value="Lost">Lost</option>
+</select>
+</label>
+<button class="btn" id="applyStatusDefaultAll" type="button">Apply default to all</button>
+</div>
+<div class="hint" style="margin-bottom:8px">Detected statuses (left) → Canonical (right)</div>
+<div class="grid" id="statusMapRows" style="gap:8px"></div>
+<div class="row wrap" style="gap:8px;margin-top:8px"><button class="btn" id="saveStatusMap">Save Status Mapping</button><button class="btn" id="loadStatusMap">Load Status Mapping</button></div>
+</div>
+</div></section>
+<section class="card"><h2>5) Room mapping</h2><div class="content">
+<div class="notice">Optional. If disabled, room values export unchanged.</div>
+<div class="row wrap" style="gap:8px;margin-bottom:8px"><button class="btn" id="toggleRoomMap">Enable room mapping</button><span class="hint">Uses Excel-like Find &amp; Replace</span></div>
+<div id="roomMapArea" style="margin-top:10px; display:none">
+<div class="hint" style="margin-bottom:8px">Detected rooms (left) → Action (right)</div>
+<div class="grid" id="roomMapRows" style="gap:8px"></div>
+</div>
+</div></section>
+<section class="card"><h2>6) Owner mapping</h2><div class="content">
+<div class="notice">Optional. If disabled, owners export unchanged.</div>
+<div class="row wrap" style="gap:8px;margin-bottom:8px"><button class="btn" id="toggleOwnerMap">Enable owner mapping</button><span class="hint">Collapsed by default</span></div>
+<div id="ownerMapArea" style="margin-top:10px; display:none">
+<div class="hint" style="margin-bottom:8px">Detected owners (left) → Action (right)</div>
+<div class="grid" id="ownerMapRows" style="gap:8px"></div>
+</div>
+</div></section>
+<section class="card"><h2>7) Export</h2><div class="content">
+<div class="row wrap" style="gap:12px">
+<label><span>Output Sheet Name</span><input id="sheetName" placeholder="Defaults to Events" type="text"/></label>
+<label><span>File Name</span><input id="fileName" placeholder="master_output.xlsx" type="text"/></label>
+<label><span>Room Separator <span class="hint">(in most cases should match section 3)</span></span><input id="roomSep" type="text" value=","/></label>
+<label><span>Replace room separators</span>
+<div class="row" style="gap:8px">
+<select id="roomSepMode">
+<option selected="" value="leave">Leave as is</option>
+<option value="replace">Replace with…</option>
+</select>
+<input disabled="" id="roomSepReplace" placeholder=", " type="text" value=", "/>
+</div>
+</label>
+<label><span>Export Format</span><select id="exportFormat"><option selected="" value="xlsx">.xlsx (Excel)</option><option value="csv">.csv</option></select></label>
+<label class="row" style="gap:8px"><input checked="" id="appendExtras" type="checkbox"/><span class="hint">Append unmatched customer columns</span></label>
+<label class="row" style="gap:8px"><input checked="" id="includeRoomsSheet" type="checkbox"/><span class="hint">Include a separate "Lists" sheet</span></label>
+<button class="btn primary" disabled="" id="exportBtn">Generate</button>
+<button class="btn" id="exportToSheetsBtn" style="margin-left:8px;" title="Create a Google Sheet from the current preview/mapping" type="button">Export to Google Sheet</button>
+</div>
+<div id="exportMsg" style="margin-top:10px"></div>
+</div></section>
+</main>
+<div class="toast" id="toast"></div>
+<script>
     // ===== Constants & helpers =====
     const NL='\n';
     const MASTER_HEADERS=['name','date','start_time','end_time','status','contact_full_name','contact_first_name','contact_last_name','account','room','location','owner','event_style','delivery_instructions','offsite_address_street','offsite_address_street2','offsite_address_city','offsite_address_state','offsite_address_zip','offsite_address_country','offsite_address_full','created_at','setup_time','teardown_time','guest_count','guaranteed_guest_count','actual_amount','grand_total','deposit_amount','description','food_and_beverage_min','payment_type','event_type','lead_source','rental_fee','amount_due','price_per_person','lost_reason'];
@@ -644,9 +643,8 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     // Init
     document.addEventListener('DOMContentLoaded',()=>{ try{ wireDnD(); }catch(_){} });
   </script>
-<script async defer src="https://apis.google.com/js/api.js"></script>
-<script async defer src="https://accounts.google.com/gsi/client"></script>
-
+<script async="" defer="" src="https://apis.google.com/js/api.js"></script>
+<script async="" defer="" src="https://accounts.google.com/gsi/client"></script>
 <script>
 (function(){
   const CLIENT_ID="7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com";
@@ -808,5 +806,73 @@ function getDataMatrix(){
 })();
 </script>
 
+<script>
+(function(){
+  function diagLog(msg, color){
+    var el = document.getElementById('diagStatus');
+    if(el){ el.textContent = msg; el.style.color = color || '#0a0'; }
+    console.log('[DIAG]', msg);
+  }
+  function ensure(fnName){
+    if (typeof window[fnName] === 'function') return true;
+    diagLog(fnName + '() not found. Is the page fully loaded?', '#c00');
+    return false;
+  }
+  // Wire the diagnostic file input
+  var inp = document.getElementById('diagnosticFileInput');
+  if (inp){
+    inp.addEventListener('change', function(e){
+      var f = e.target.files && e.target.files[0];
+      if (!f){ diagLog('No file selected', '#c00'); return; }
+      if (!ensure('handleFile')) return;
+      try {
+        diagLog('Reading file: ' + f.name + ' ...');
+        handleFile(f);
+        // Poll for meta update to confirm load success
+        setTimeout(function(){
+          try{
+            var meta = document.getElementById('customerMeta');
+            if (meta && meta.textContent && meta.textContent.trim().length){
+              diagLog('Loaded OK. ' + meta.textContent.replace(/\s+/g,' ').trim());
+            } else {
+              diagLog('File read attempted; check preview/mapping UI below. If blank, open DevTools > Console for errors.', '#c60');
+            }
+          }catch(_){}
+        }, 800);
+      } catch(err){
+        console.error(err);
+        diagLog('Error in handleFile: ' + (err && err.message ? err.message : String(err)), '#c00');
+        alert('Error reading file: ' + (err && err.message ? err.message : String(err)));
+      }
+    });
+  }
+  // Wire a diagnostic export button that calls your normal exportToSheets
+  var ex = document.getElementById('diagExportBtn');
+  if (ex){
+    ex.addEventListener('click', async function(){
+      if (!ensure('exportToSheets')) return;
+      try {
+        diagLog('Starting export...');
+        await exportToSheets();
+        diagLog('Export finished (check for a new Google Sheet tab).');
+      } catch(err){
+        console.error(err);
+        diagLog('Export error: ' + (err && err.message ? err.message : String(err)), '#c00');
+        alert('Export failed: ' + (err && err.message ? err.message : String(err)));
+      }
+    });
+  }
+  // Also log when the original inputs change (if present)
+  ['customerFile','overlayPicker'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el){
+      el.addEventListener('change', function(e){
+        var f = e.target.files && e.target.files[0];
+        if (f) diagLog('[Hooked '+id+'] file selected: ' + f.name);
+      });
+    }
+  });
+})();
+</script>
 </body>
 </html>
