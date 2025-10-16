@@ -667,38 +667,11 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     return { rooms:[...rooms], owners:[...owners], statuses:unmatched, nonMatched:[] };
   }
 
-  async 
-function exportToSheets(){
+  async function exportToSheets(){
     try{
-      if(!customer.rows.length){ alert('No table detected (or no rows). Run Generate first.'); return; }
-      const mappingRows=Array.from(document.querySelectorAll('#mappingRows .mapping-row'));
-      try{ if(STATUS_MAP_ENABLED){ STATUS_MAP=Object.assign({}, STATUS_MAP, collectStatusMap()); } }catch(_){ }
-      try{ OWNER_MAP=Object.assign({}, collectOwnerMap()); }catch(_){ }
-      try{ ROOM_MAP=Object.assign({}, collectRoomMap()); }catch(_){ }
-      function headerKeyFromLabel(el){ if(el && el.firstChild && el.firstChild.nodeType===1) { const m=el.firstChild.textContent||''; return m.replace('required','').trim(); } return (el.textContent||'').replace('required','').trim(); }
-      const used=new Set(); mappingRows.forEach(row=>{ const sel=row.children[1]; if(sel&&sel.value) used.add(sel.value);});
-      const append=$('appendExtras')?.checked; const extras=append? customer.headers.filter(h=>h && !used.has(h)):[].sort((a,b)=>a.localeCompare(b));
-      const headersOut=[...master.headers, ...extras];
-      const outRows=[];
-      const applyOwnerMap = ownerMappingIsActive();
-      const applyRoomMap = roomMappingIsActive();
-      for(const srcRow of customer.rows){
-        const out={};
-        mappingRows.forEach(row=>{
-          const labelEl=row.children[0]; const sel=row.children[1]; const transform=row.children[2]?.dataset||null;
-          const key=headerKeyFromLabel(labelEl);
-          let value='';
-          if(sel && sel.value){ value=srcRow[sel.value]; }
-          if(key==='room'){ value = applyRoomMap ? canonicalizeRoomValue(value) : value; }
-          if(key==='status'){ if(STATUS_MAP_ENABLED) value=canonicalizeStatus(value); }
-          if(key==='owner'){ value = applyOwnerMap ? canonicalizeOwner(value, OWNER_MAP) : value; }
-          out[key]=value;
-        });
-        extras.forEach(h=>{ out[h]=srcRow[h]; });
-        outRows.push(out);
-      }
-      const eventsGrid=[ headersOut, ...outRows.map(r => headersOut.map(h => r[h] ?? "")) ];
-
+      const snap=getData();
+      if(!snap || !snap.headersOut.length || !snap.outRows.length){ alert('No table detected (or no rows). Run Generate first.'); return; }
+      const eventsGrid=[ snap.headersOut, ...snap.outRows.map(r => snap.headersOut.map(h => r[h] ?? "")) ];
       const lists=computeLists(snap.headersOut, snap.outRows);
       const headers=["room","room in TS","", "owners","owners in TS","", "status","", "unmatched_rooms","unmatched_owners","unmatched_status","appended_headers"];
       const len=Math.max(lists.rooms.length, lists.owners.length, lists.statuses.length, lists.nonMatched.length, 1);
@@ -715,85 +688,52 @@ function exportToSheets(){
       window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`,'_blank');
     }catch(e){ console.error(e); alert('Export failed: '+(e?.result?.error?.message||e.message||String(e))); }
   }
+
+  // expose for external click binders
+  try{ window.exportToSheets = exportToSheets; }catch(_){ /* ignore */ }
 })();
 </script>
-<script>window.exportToSheets = exportToSheets;</script>
 
-</body>
-</html>
-)();
-</script>
 
-<!-- ===== Binder Patch: make sure the Export button exists & is wired ===== -->
+<!-- Binder: ensure export button and handler are wired -->
 <style>
-  #exportToSheetsFloating{position:fixed;right:16px;bottom:16px;z-index:99999;padding:10px 14px;border:0;border-radius:8px;background:#1a73e8;color:#fff;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.2);cursor:pointer}
-  #exportToSheetsFloating:hover{filter:brightness(1.05)}
+#exportToSheetsFloating{position:fixed;right:16px;bottom:16px;z-index:99999;padding:10px 14px;border:0;border-radius:8px;background:#1a73e8;color:#fff;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.2);cursor:pointer}
+#exportToSheetsFloating:hover{filter:brightness(1.05)}
 </style>
 <script>
 (function(){
-  // 1) If exportToSheets exists but isn't global, expose it
-  try {
-    if (typeof exportToSheets === 'function' && !window.exportToSheets) {
-      window.exportToSheets = exportToSheets;
-    }
-  } catch(_) {}
-
-  function bindExportButtons() {
-    const selectors = ['#exportToSheetsBtn', '#exportBtn', '.btn-export', '#export_to_google'];
-    let found = false;
-
-    selectors.forEach(sel => {
-      document.querySelectorAll(sel).forEach(el => {
-        found = true;
-        if (!el.dataset._exportBound) {
-          el.dataset._exportBound = '1';
-          el.addEventListener('click', function (e) {
-            e.preventDefault();
-            try {
-              console.log('[DBG] Export click via', sel);
-              if (typeof window.exportToSheets === 'function') {
-                window.exportToSheets();
-              } else {
-                alert('Export action not found. (exportToSheets not defined)');
-              }
-            } catch (err) {
-              console.error(err);
-              alert('Export error: ' + (err?.message || String(err)));
-            }
-          });
-        }
+  function bind(){
+    const candidates=['#exportToSheetsBtn','#exportBtn','.btn-export','#export_to_google'];
+    let wired=false;
+    candidates.forEach(sel=>{
+      document.querySelectorAll(sel).forEach(el=>{
+        if(el.dataset._exportBound) return;
+        el.dataset._exportBound='1';
+        el.addEventListener('click', function(e){
+          e.preventDefault();
+          try{
+            if(typeof window.exportToSheets==='function'){ window.exportToSheets(); wired=true; }
+            else alert('Export action not found (exportToSheets).');
+          }catch(err){ console.error(err); alert('Export error: '+(err?.message||String(err))); }
+        });
       });
     });
-
-    // 2) If no obvious button is present, inject a floating one
-    if (!found && !document.getElementById('exportToSheetsFloating')) {
-      const b = document.createElement('button');
-      b.id = 'exportToSheetsFloating';
-      b.type = 'button';
-      b.textContent = 'Export to Google Sheet';
-      b.addEventListener('click', function(){
-        try {
-          if (typeof window.exportToSheets === 'function') {
-            window.exportToSheets();
-          } else {
-            alert('Export action not found. (exportToSheets not defined)');
-          }
-        } catch (err) {
-          console.error(err);
-          alert('Export error: ' + (err?.message || String(err)));
-        }
-      });
+    if(!document.getElementById('exportToSheetsFloating')){
+      const b=document.createElement('button'); b.id='exportToSheetsFloating'; b.type='button'; b.textContent='Export to Google Sheet';
+      b.onclick=()=>{
+        try{
+          if(typeof window.exportToSheets==='function'){ window.exportToSheets(); }
+          else alert('Export action not found (exportToSheets).');
+        }catch(err){ console.error(err); alert('Export error: '+(err?.message||String(err))); }
+      };
       document.body.appendChild(b);
-      console.log('[DBG] Added floating Export button');
     }
   }
-
-  // Bind on load and again after UI builds
-  document.addEventListener('DOMContentLoaded', bindExportButtons);
-  setTimeout(bindExportButtons, 600);
-  setTimeout(bindExportButtons, 1600);
+  document.addEventListener('DOMContentLoaded', bind);
+  setTimeout(bind, 700); setTimeout(bind, 1600);
 })();
 </script>
-<!-- ===== /Binder Patch ===== -->
+<!-- /Binder -->
+
 </body>
 </html>
