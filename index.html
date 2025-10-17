@@ -1021,13 +1021,13 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 </script>
 <!-- === End: 3seats Exporter === -->
 
-<!-- ===== 3seats: Step 8 Exporter (v3 – no forced light styles, inherits Step 7) ===== -->
+<!-- ===== 3seats: Step 8 Exporter (v4 – clones Step 7 card) ===== -->
 <script async defer src="https://apis.google.com/js/api.js"></script>
 <script async defer src="https://accounts.google.com/gsi/client"></script>
 <script>
 (function(){
-  if (window.__TS_STEP8_WIRED_V3__) return;
-  window.__TS_STEP8_WIRED_V3__ = true;
+  if (window.__TS_STEP8_WIRED_V4__) return;
+  window.__TS_STEP8_WIRED_V4__ = true;
 
   const TEMPLATE_ID = "1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
   const CLIENT_ID   = "7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com";
@@ -1035,76 +1035,61 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
   const $ = (id)=>document.getElementById(id);
   const setStatus = (m)=>{ const s=$('ts-export-status'); if(s) s.textContent=m; };
 
-  // ---- Find the Step 7 section and clone its look/placement ----
-  function findStep7(){
+  // --- Find Step 7 (its card) ---
+  function findStep7Card(){
     const hs = Array.from(document.querySelectorAll('h1,h2,h3,h4,strong,b,.title,.header'));
     for (const h of hs){
       const t = (h.textContent||'').trim().toLowerCase();
       if (/^7[\).\s]/.test(t) && t.includes('export') && t.includes('google')){
-        return h.closest('section, .step, .card, .panel, .box, .container, .chunk, div') || null;
+        // The theme’s card wrapper:
+        return h.closest('section, .step, .card, .panel, .box, .container, .chunk, .ts-card, div') || null;
       }
     }
     return null;
   }
 
-  function createStep8(step7){
-    // Create same tag as Step 7 container and COPY ITS CLASSES (no inline colors!)
-    const tag = step7 ? step7.tagName.toLowerCase() : 'div';
-    const card = document.createElement(tag);
-    card.id = 'ts-step8-card';
-    if (step7){
-      // Copy class names (skip collapsed/hidden)
-      step7.classList.forEach(c => { if (!/collapsed|hidden/i.test(c)) card.classList.add(c); });
-      // Copy data-attributes that might drive theme spacing
-      for (const a of step7.attributes) {
-        if (a.name.startsWith('data-')) card.setAttribute(a.name, a.value);
-      }
-      // Do NOT set background/border/shadows; let theme handle it.
-      const cs = getComputedStyle(step7);
-      card.style.marginTop = cs.marginTop;
-      card.style.marginBottom = cs.marginBottom;
-      card.style.padding = cs.padding; // OK: spacing only
-    }
+  // --- Build a Step 8 card by cloning Step 7’s wrapper & inner content wrapper classes ---
+  function buildStep8From(step7){
+    // Clone ONLY the outer element (to inherit classes/attrs), no children
+    const step8 = step7 ? step7.cloneNode(false) : document.createElement('div');
+    step8.id = 'ts-step8-card';
 
-    // Heading tag same “kind” as Step 7’s heading if present
-    let Head = 'div';
+    // Find Step 7 heading & content wrapper to copy their classes
     const h7 = step7 && step7.querySelector('h1,h2,h3,h4,.title,.header,strong,b');
-    if (h7) Head = (h7.tagName || 'div').toLowerCase();
+    const content7 =
+      (step7 && Array.from(step7.children).find(el => el !== h7 && el.tagName && el.tagName.toLowerCase() !== 'script')) ||
+      (step7 && step7.querySelector('.content, .body, .card-content, .section-body, .panel-body, .p-*, .px-*, .py-*'));
 
-    const title = document.createElement(Head);
-    title.textContent = '8) Export to Google Sheets';
-    // Copy heading classes for color/size parity
-    if (h7 && h7.classList.length) h7.classList.forEach(c => title.classList.add(c));
-    // If no heading classes, just make it a bit bolder and let theme color apply
-    if (!title.classList.length) title.style.fontWeight = '600';
+    // Make Step 8 heading
+    const HeadTag = h7 ? (h7.tagName || 'div').toLowerCase() : 'h3';
+    const h8 = document.createElement(HeadTag);
+    h8.textContent = '8) Export to Google Sheets';
+    if (h7 && h7.classList.length) h7.classList.forEach(c => h8.classList.add(c));
+    else h8.style.fontWeight = '600';
 
-    const desc = document.createElement('div');
-    // Copy helper/description class if Step 7 has one
-    const helper = step7 && step7.querySelector('.help,.hint,.description,small');
-    if (helper && helper.classList.length) helper.classList.forEach(c => desc.classList.add(c));
-    desc.innerHTML = 'Pick the Excel you generated → Google converts it → we copy <b>Events</b> as values and <b>Lists</b> with formulas preserved into your Template copy.';
+    // Make Step 8 body wrapper; copy content wrapper classes so spacing/bg match
+    const body = document.createElement(content7 ? content7.tagName.toLowerCase() : 'div');
+    if (content7 && content7.classList.length) content7.classList.forEach(c => body.classList.add(c));
 
+    // Controls row – try to reuse a row/fields class from Step 7’s body
     const row = document.createElement('div');
-    // Try to reuse a “controls row” class from step 7 (keeps widths/gaps consistent)
-    const ctrRow = step7 && step7.querySelector('.controls,.row,.fields,.inline-controls,.grid');
-    if (ctrRow && ctrRow.classList.length) ctrRow.classList.forEach(c => row.classList.add(c));
+    const row7 = step7 && step7.querySelector('.controls, .row, .fields, .inline-controls, .grid, .flex');
+    if (row7 && row7.classList.length) row7.classList.forEach(c => row.classList.add(c));
     else { row.style.display='flex'; row.style.flexWrap='wrap'; row.style.alignItems='center'; row.style.gap='10px'; }
 
+    // Input (copy input classes)
     const name = document.createElement('input');
     name.id = 'ts-export-base';
     name.placeholder = 'master_output';
-    // Style input same as an existing text input in Step 7
     const refInput = step7 && step7.querySelector('input[type="text"], .input, input, select, textarea');
     if (refInput){
-      const cl = refInput.classList;
-      if (cl && cl.length) cl.forEach(c => name.classList.add(c));
+      if (refInput.classList.length) refInput.classList.forEach(c => name.classList.add(c));
       const cs = getComputedStyle(refInput);
-      name.style.padding = cs.padding;
-      name.style.border = cs.border;
-      name.style.borderRadius = cs.borderRadius;
       name.style.minWidth = '280px';
+      name.style.padding = cs.padding; name.style.border = cs.border; name.style.borderRadius = cs.borderRadius;
     }
 
+    // Button (copy button classes)
     const btn = document.createElement('button');
     btn.id = 'ts-export-btn';
     btn.textContent = 'Export to Google Sheet';
@@ -1112,22 +1097,25 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     if (refBtn){
       if (refBtn.classList.length) refBtn.classList.forEach(c => btn.classList.add(c));
       const cs = getComputedStyle(refBtn);
-      btn.style.padding = cs.padding;
-      btn.style.borderRadius = cs.borderRadius;
-      btn.style.border = cs.border;
+      btn.style.padding = cs.padding; btn.style.borderRadius = cs.borderRadius; btn.style.border = cs.border;
     }
 
+    // Helper/status text – copy helper style class if present
     const status = document.createElement('span');
     status.id = 'ts-export-status';
     status.textContent = 'Idle';
+    const helper = step7 && step7.querySelector('.help,.hint,.description,small,.text-muted');
     if (helper && helper.classList.length) helper.classList.forEach(c => status.classList.add(c));
 
-    row.appendChild(name); row.appendChild(btn); row.appendChild(status);
+    // Description – use helper class for subdued color
+    const desc = document.createElement('div');
+    if (helper && helper.classList.length) helper.classList.forEach(c => desc.classList.add(c));
+    desc.innerHTML = 'Pick the Excel you generated → Google converts it → we copy <b>Events</b> as values and <b>Lists</b> with formulas preserved into your Template copy.';
 
-    card.appendChild(title);
-    card.appendChild(desc);
-    card.appendChild(row);
-    return card;
+    row.appendChild(name); row.appendChild(btn); row.appendChild(status);
+    body.appendChild(desc); body.appendChild(row);
+    step8.appendChild(h8); step8.appendChild(body);
+    return step8;
   }
 
   function hideOldStep7Button(step7){
@@ -1140,7 +1128,7 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
     });
   }
 
-  // ---- Google export (same working logic) ----
+  // ---- Google export (working variant) ----
   async function pickExcel(){ return await new Promise(res=>{ const i=document.createElement('input'); i.type='file'; i.accept='.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'; i.style.position='fixed'; i.style.left='-9999px'; document.body.appendChild(i); i.onchange=()=>res(i.files?.[0]||null); i.click(); }); }
   async function ensureGapi(){ setStatus('Loading Google APIs…'); await new Promise((ok,err)=>{ gapi.load('client', async()=>{ try{ await gapi.client.init({}); ok(); }catch(e){ err(e); } }); }); await gapi.client.load('https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'); await gapi.client.load('https://sheets.googleapis.com/$discovery/rest?version=v4'); }
   async function ensureToken(){ setStatus('Getting Google token…'); return await new Promise((ok,err)=>{ const t=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets',use_fedcm_for_prompt:true,callback:()=>{}}); t.callback=(r)=>r?.access_token?ok(r.access_token):err(new Error(r?.error||'No token')); t.requestAccessToken({prompt:'consent'}); }); }
@@ -1160,12 +1148,12 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 
       const baseName = (($('ts-export-base')?.value || 'master_output').trim()||'master_output').replace(/\s+/g,'_');
 
-      // Copy your template
+      // Copy template
       setStatus('Copying template…');
       const copy = await gapi.client.drive.files.copy({ fileId:TEMPLATE_ID, fields:'id', resource:{ name:`${baseName} (Google Sheet)` }});
       const destId = copy.result.id;
 
-      // Upload & convert the Excel
+      // Upload & convert Excel
       setStatus('Uploading & converting…');
       const meta = { name: baseName + ' (Converted)', mimeType: 'application/vnd.google-apps.spreadsheet' };
       const form = new FormData();
@@ -1177,27 +1165,24 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
       // Detect sheet titles
       const info = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: convertedId, fields:'sheets(properties(title))' });
       const titles = (info.result.sheets||[]).map(s=>s.properties.title);
-      const find = (cands)=>{ const lc=titles.map(t=>t.toLowerCase()); for(const c of cands){ const i=lc.indexOf(c.toLowerCase()); if(i>=0) return titles[i]; } return null; };
+      const find = (c)=>{ const lc=titles.map(t=>t.toLowerCase()); for(const cand of c){ const i=lc.indexOf(cand.toLowerCase()); if(i>=0) return titles[i]; } return null; };
       const eTitle = find(['Events','Event','Sheet1']) || titles[0];
       const lTitle = find(['Lists','List']);
 
-      // Ensure destination sheets exist (Events, Lists)
-      const ensure = async(title)=>{
+      // Ensure destination sheets exist
+      async function ensure(title){
         const r = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: destId, fields:'sheets(properties(title))' });
         const ok = (r.result.sheets||[]).some(s=>s.properties.title===title);
-        if (!ok){
-          await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId: destId, resource:{requests:[{addSheet:{properties:{title}}}] }});
-        }
-      };
+        if (!ok) await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId: destId, resource:{requests:[{addSheet:{properties:{title}}}] }});
+      }
       await ensure('Events'); await ensure('Lists');
 
-      // Copy Events as VALUES (captures ALL columns beyond Z)
+      // Copy data
       setStatus('Copying Events…');
       const events = await readValues(convertedId, eTitle);
       await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: destId, range: 'Events!A1:ZZZ100000' });
       await writeValues(destId, 'Events', events);
 
-      // Copy Lists with FORMULAS preserved
       if (lTitle){
         setStatus('Copying Lists…');
         const rows = await readFormulas(convertedId, lTitle);
@@ -1215,20 +1200,16 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
   }
 
   document.addEventListener('DOMContentLoaded', ()=>{
-    const step7 = findStep7();
-    const step8 = createStep8(step7);
-    // Place immediately after Step 7 so width & spacing match
-    if (step7 && step7.parentElement) step7.parentElement.insertBefore(step8, step7.nextSibling);
-    else document.body.appendChild(step8);
+    const step7 = findStep7Card();
+    if (!step7) return; // fail-safe: don’t inject a floating block
 
-    // Hide the old Step 7 exporter button (non-destructive)
+    const step8 = buildStep8From(step7);
+    step7.parentElement.insertBefore(step8, step7.nextSibling);   // place RIGHT AFTER Step 7
     hideOldStep7Button(step7);
-
-    // Wire the new button
-    $('ts-export-btn')?.addEventListener('click', (e)=>{ e.preventDefault(); exportNow(); });
+    $('#ts-export-btn')?.addEventListener('click', (e)=>{ e.preventDefault(); exportNow(); });
   });
 })();
 </script>
-<!-- ===== /3seats: Step 8 Exporter (v3) ===== -->
+<!-- ===== /3seats: Step 8 Exporter (v4) ===== -->
 </body>
 </html>
