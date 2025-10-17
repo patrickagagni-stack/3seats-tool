@@ -58,7 +58,7 @@ function setStatusBanner(msg){
 </script>
 </head>
 <style>
-  /* Hide Save/Load Mapping buttons anywhere on the page */
+  /* Hide any Save/Load Mapping buttons anywhere on the page */
   .ts-hide-mapping { display: none !important; }
 </style>
 
@@ -70,22 +70,23 @@ function setStatusBanner(msg){
     els.forEach(el => {
       const txt = (el.textContent || el.value || '').replace(/\s+/g, ' ').trim().toLowerCase();
       if (!txt) return;
-      if (txt.includes('save mapping') || txt.includes('load mapping')) {
+      // Broaden matches to cover variants across steps
+      if (
+        txt.includes('save mapping') ||
+        txt.includes('load mapping') ||
+        txt.includes('save status mapping') ||
+        txt.includes('load status mapping')
+      ) {
         el.classList.add('ts-hide-mapping');
       }
     });
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    // Initial pass
     hideAllMappingButtons();
-
-    // Re-run when sections expand or UI re-renders
-    const mo = new MutationObserver(muts => {
-      // This is inexpensive; we just sweep and hide again
-      hideAllMappingButtons();
-    });
-    mo.observe(document.body, { childList: true, subtree: true, characterData: true });
+    // Keep watching for Step 4’s dynamic content
+    new MutationObserver(() => hideAllMappingButtons())
+      .observe(document.body, { childList: true, subtree: true, characterData: true });
   });
 })();
 </script>
