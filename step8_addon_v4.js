@@ -26,30 +26,28 @@
 
 // Replace the whole function with this:
 function findStep7Card(){
-  // 1) Prefer explicit headings for step 7
+  // Prefer a heading that mentions "export" (any step number)
   const hs = Array.from(document.querySelectorAll('h1,h2,h3,h4,strong,b,.title,.header'));
   for (const h of hs){
-    const raw = (h.textContent || '').replace(/\s+/g, ' ').trim();
-    const t = raw.toLowerCase();
-    // Match "7) Export" (no longer require 'google')
-    if (/^7[\).\s]/.test(t) && t.includes('export')){
+    const raw = (h.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (raw.includes('export')) {
       const card = h.closest('section, .step, .card, .panel, .box, .container, .chunk, .ts-card, div');
       if (card) return card;
     }
   }
+  // Fallback: find a container that has a "Generate" button or "Export Format"
+  const genBtn = Array.from(document.querySelectorAll('button,.button,input[type="submit"],[role="button"]'))
+    .find(b => ((b.textContent||b.value||'').toLowerCase().includes('generate')));
+  if (genBtn) return genBtn.closest('section, .step, .card, .panel, .box, .container, .chunk, .ts-card, div');
 
-  // 2) Fallback: scan the DOM for any element whose text looks like "7) Export"
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, null);
-  let node;
-  while ((node = walker.nextNode())) {
-    const txt = (node.textContent || '').toLowerCase();
-    if (/^7[\).\s]*export\b/.test(txt)) {
-      const card = node.closest('section, .step, .card, .panel, .box, .container, .chunk, .ts-card, div');
-      if (card) return card;
-    }
-  }
+  const label = Array.from(document.querySelectorAll('*')).find(el =>
+    (el.textContent||'').toLowerCase().includes('export format')
+  );
+  if (label) return label.closest('section, .step, .card, .panel, .box, .container, .chunk, .ts-card, div');
+
   return null;
 }
+
 
 
   function buildStep8From(step7){
