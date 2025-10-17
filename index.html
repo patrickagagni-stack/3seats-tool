@@ -1014,10 +1014,14 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
   }
   document.addEventListener('DOMContentLoaded', function(){
     wireByText();
-    setTimeout(wireByText, 600);
-    setTimeout(wireByText, 1500);
-  });
+try {
+  setTimeout(wireByText, 600);
+  setTimeout(wireByText, 1500);
+} catch (e) {
+  console.error('Step wiring failed', e);
+}
 })();
+
 </script>
 <!-- === End: 3seats Exporter === -->
 
