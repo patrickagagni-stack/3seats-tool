@@ -24,16 +24,33 @@
   const $ = (id)=>document.getElementById(id);
   const setStatus = (m)=>{ const s=$('ts-export-status'); if(s) s.textContent=m; };
 
-  function findStep7Card(){
-    const hs = Array.from(document.querySelectorAll('h1,h2,h3,h4,strong,b,.title,.header'));
-    for (const h of hs){
-      const t = (h.textContent||'').trim().toLowerCase();
-      if (/^7[\.\)\s]/.test(t) && t.includes('export') && t.includes('google')){
-        return h.closest('section, .step, .card, .panel, .box, .container, .chunk, .ts-card, div') || null;
-      }
+// Replace the whole function with this:
+function findStep7Card(){
+  // 1) Prefer explicit headings for step 7
+  const hs = Array.from(document.querySelectorAll('h1,h2,h3,h4,strong,b,.title,.header'));
+  for (const h of hs){
+    const raw = (h.textContent || '').replace(/\s+/g, ' ').trim();
+    const t = raw.toLowerCase();
+    // Match "7) Export" (no longer require 'google')
+    if (/^7[\).\s]/.test(t) && t.includes('export')){
+      const card = h.closest('section, .step, .card, .panel, .box, .container, .chunk, .ts-card, div');
+      if (card) return card;
     }
-    return null;
   }
+
+  // 2) Fallback: scan the DOM for any element whose text looks like "7) Export"
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, null);
+  let node;
+  while ((node = walker.nextNode())) {
+    const txt = (node.textContent || '').toLowerCase();
+    if (/^7[\).\s]*export\b/.test(txt)) {
+      const card = node.closest('section, .step, .card, .panel, .box, .container, .chunk, .ts-card, div');
+      if (card) return card;
+    }
+  }
+  return null;
+}
+
 
   function buildStep8From(step7){
     const step8 = step7 ? step7.cloneNode(false) : document.createElement('div');
