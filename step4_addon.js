@@ -1,7 +1,5 @@
-// 3seats Step-4 Addon – “Existing Rooms and Owners in Tripleseat Upload”
-// Reads an uploaded Excel, finds the proper sheet (ignoring EXAMPLE),
-// extracts Rooms (under “Event Space”) and Owners (under “Full Name”),
-// and injects them into Lists!B2 (Rooms) and Lists!E2 (Owners) in the final Excel.
+// 3seats Step-4 Addon v4 – “Existing Rooms and Owners in Tripleseat Upload”
+// Safer Excel export (defensive writes to avoid undefined.slice in ExcelJS)
 
 (function(){
   if (window.__TS_STEP4_WIRED__) return;
@@ -94,15 +92,19 @@
 
   function extract_list_below(ws, headerRow, skipRows=1){
     const out=[]; let blanks=0;
-    for (let r=headerRow+1+skipRows; r<=ws.rowCount; r++){
-      const v=ws.getCell(r,1).value;
-      const s=String(v||'').trim();
+    // start below header (skip instruction row by default)
+    for (let r=headerRow+1+skipRows; r<=Math.max(headerRow+1+skipRows+5000, headerRow+50); r++){
+      const cell = ws.getCell(r,1);
+      if (!cell) { blanks++; if (blanks>=3) break; continue; }
+      const s = String((cell.value==null?'':cell.value)).trim();
       if (!s){ blanks++; if (blanks>=3) break; }
       else {
         blanks=0;
-        if (!/^enter\s|^type\s|^do not/i.test(s.toLowerCase())) out.push(s);
+        const low = s.toLowerCase();
+        if (!/^enter\s|^type\s|^do not/i.test(low)) out.push(s);
       }
     }
+    // de-dupe preserve order
     const seen=new Set(), dedup=[];
     for(const x of out){const k=x.toLowerCase(); if(!seen.has(k)){seen.add(k);dedup.push(x);} }
     return dedup;
@@ -147,33 +149,75 @@
     return {rooms,owners,sheetUsed:pick.name,foundRoomHeader:!!pick.rHdr,foundOwnerHeader:!!pick.uHdr};
   }
 
-  // ---------- ExcelJS patch ----------
+  // ---------- ExcelJS patch (safer) ----------
+  function writeColumnValuesSafe(ws, colIndex, startRow, values){
+    if (!ws || !values || !values.length) return;
+    let r = startRow;
+    for (const v of values){
+      const cell = ws.getCell(r++, colIndex);
+      // Write empty string instead of null to avoid internal slice() paths
+      cell.value = (v == null ? '' : v);
+    }
+  }
+
+  function clearColumnRangeSafe(ws, colIndex, startRow, endRow){
+    if (!ws) return;
+    for (let r = startRow; r <= endRow; r++){
+      const cell = ws.getCell(r, colIndex);
+      cell.value = ''; // safer than null
+    }
+  }
+
   function applyListsToWorkbook(workbook, lists){
-    if(!workbook||!lists)return;
-    let ws=workbook.getWorksheet('Lists');
-    if(!ws)ws=workbook.addWorksheet('Lists');
-    const max=ws.rowCount||1000;
-    for(let r=2;r<=max;r++){ws.getCell(r,2).value=null;ws.getCell(r,5).value=null;}
-    let i=2; (lists.rooms||[]).forEach(v=>ws.getCell(i++,2).value=v);
-    i=2; (lists.owners||[]).forEach(v=>ws.getCell(i++,5).value=v);
+    try{
+      if(!workbook || !lists) return;
+      const wsName = 'Lists';
+      let ws = workbook.getWorksheet && workbook.getWorksheet(wsName);
+      if (!ws && workbook.addWorksheet) ws = workbook.addWorksheet(wsName);
+      if (!ws) return; // give up quietly if worksheet API not present
+
+      const rooms = Array.isArray(lists.rooms) ? lists.rooms : [];
+      const owners = Array.isArray(lists.owners) ? lists.owners : [];
+
+      // Clear a reasonable block only if we actually plan to write
+      const clearRows = Math.max(rooms.length, owners.length, 100);
+      clearColumnRangeSafe(ws, 2, 2, 1 + clearRows); // B2..B{clear}
+      clearColumnRangeSafe(ws, 5, 2, 1 + clearRows); // E2..E{clear}
+
+      // Write new values
+      writeColumnValuesSafe(ws, 2, 2, rooms);  // Rooms -> B2...
+      writeColumnValuesSafe(ws, 5, 2, owners); // Owners -> E2...
+    }catch(e){
+      console.warn('[Step4] applyListsToWorkbook skipped:', e);
+    }
   }
 
   function patchExcelJSOnce(){
     if(window.__TS_STEP4_PATCHED__)return;
     window.__TS_STEP4_PATCHED__=true;
-    const ExcelJS=window.ExcelJS;
-    if(!ExcelJS||!ExcelJS.Workbook){setTimeout(patchExcelJSOnce,500);return;}
-    const orig=ExcelJS.Workbook.prototype.xlsx.writeBuffer;
-    if(!orig)return;
-    ExcelJS.Workbook.prototype.xlsx.writeBuffer=function(){
+
+    const ExcelJS = window.ExcelJS;
+    if (!ExcelJS || !ExcelJS.Workbook || !ExcelJS.Workbook.prototype || !ExcelJS.Workbook.prototype.xlsx){
+      // Retry later if ExcelJS not ready yet
+      setTimeout(patchExcelJSOnce, 600);
+      return;
+    }
+
+    const origWriteBuffer = ExcelJS.Workbook.prototype.xlsx.writeBuffer;
+    if (typeof origWriteBuffer !== 'function') return;
+
+    ExcelJS.Workbook.prototype.xlsx.writeBuffer = function(){
       try{
-        if(window.__TS_STEP4_LISTS&&(window.__TS_STEP4_LISTS.rooms?.length||window.__TS_STEP4_LISTS.owners?.length)){
-          applyListsToWorkbook(this,window.__TS_STEP4_LISTS);
+        const data = window.__TS_STEP4_LISTS;
+        if (data && (Array.isArray(data.rooms) || Array.isArray(data.owners))){
+          applyListsToWorkbook(this, data);
         }
-      }catch(e){console.warn('[Step4] Injection skipped',e);}
-      return orig.apply(this,arguments);
+      }catch(e){
+        console.warn('[Step4] Injection skipped (writeBuffer):', e);
+      }
+      return origWriteBuffer.apply(this, arguments);
     };
-    console.log('[Step4] ExcelJS patched for Rooms/Owners injection');
+    console.log('[Step4] ExcelJS patched for Rooms/Owners injection (safe)');
   }
 
   // ---------- Wire UI ----------
@@ -182,6 +226,8 @@
     const step4=buildStep4From(step3);
     if(step3&&step3.parentElement)step3.parentElement.insertBefore(step4,step3.nextSibling);
     else document.body.appendChild(step4);
+
+    // Patch Excel export so your existing "Generate" auto-injects lists
     patchExcelJSOnce();
 
     const file=document.getElementById('ts-step4-file');
