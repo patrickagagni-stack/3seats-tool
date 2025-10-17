@@ -853,7 +853,8 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
       setStatusBanner('Loading Google APIs…');
       await ensureGapi();
       setStatusBanner('Authorizing with Google…');
-      const token = await ensureToken();
+      setStatusBanner('Authorizing with Google…');
+      const token = await __getAccessTokenRobust('7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com');
       gapi.client.setToken({access_token: token});
 
       // Base name: try an existing input your tool already has; fall back to "master_output"
