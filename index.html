@@ -59,14 +59,13 @@ function setStatusBanner(msg){
 </head>
 <style>
   /* Hide Save/Load Mapping buttons (Steps 2 & 4 — optionally Step 6) */
-  .ts-hide-mapping {
-    display: none !important;
-  }
+  .ts-hide-mapping { display: none !important; }
 </style>
 
 <script>
 (function(){
   function hideByText(root, texts) {
+    if (!root) return;
     const btns = root.querySelectorAll('button, .button, input[type="button"], input[type="submit"]');
     btns.forEach(el => {
       const t = (el.textContent || el.value || '').trim().toLowerCase();
@@ -77,7 +76,7 @@ function setStatusBanner(msg){
   }
 
   function sectionByHeading(n) {
-    // Finds the section that starts with "n)"
+    // Finds the section/card whose heading starts with "n)"
     const heads = Array.from(document.querySelectorAll('h1,h2,h3,h4,strong,b,.title,.header'));
     for (const h of heads) {
       const txt = (h.textContent || '').trim().toLowerCase();
@@ -88,14 +87,24 @@ function setStatusBanner(msg){
     return null;
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
+  function hideMappingForStep(n) {
     const targets = ['save mapping','load mapping'];
-    // Step 2
-    const s2 = sectionByHeading('2'); if (s2) hideByText(s2, targets);
-    // Step 4
-    const s4 = sectionByHeading('4'); if (s4) hideByText(s4, targets);
-    // If you also want to hide them in Step 6, uncomment:
-    // const s6 = sectionByHeading('6'); if (s6) hideByText(s6, targets);
+    const sec = sectionByHeading(n);
+    if (sec) hideByText(sec, targets);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    // Initial hide (Step 2 is visible immediately; Step 4 might be collapsed)
+    hideMappingForStep('2');
+    hideMappingForStep('4');
+
+    // Re-hide when DOM changes (e.g., Step 4 expands, content re-renders)
+    const mo = new MutationObserver(() => {
+      hideMappingForStep('4');
+      // Uncomment if you later want to also hide Step 6 dynamically:
+      // hideMappingForStep('6');
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
   });
 })();
 </script>
