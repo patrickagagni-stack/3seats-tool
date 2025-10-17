@@ -1,11 +1,13 @@
-// 3seats Step-4 Addon v4 – “Existing Rooms and Owners in Tripleseat Upload”
-// Safer Excel export (defensive writes to avoid undefined.slice in ExcelJS)
+// 3seats Step-4 Addon v5 – “Existing Rooms and Owners in Tripleseat Upload”
+// - Finds the correct sheet (ignores EXAMPLE), extracts Rooms/Owners from col A headers
+// - Injects into Lists!B2 (Rooms) and Lists!E2 (Owners) during export
+// - ULTRA DEFENSIVE: never assumes shapes, avoids null/undefined paths that can trigger .slice
 
 (function(){
-  if (window.__TS_STEP4_WIRED__) return;
-  window.__TS_STEP4_WIRED__ = true;
+  if (window.__TS_STEP4_WIRED_V5__) return;
+  window.__TS_STEP4_WIRED_V5__ = true;
 
-  // ---------- load SheetJS ----------
+  // ---------- load SheetJS (for parsing uploaded spreadsheet) ----------
   function loadScriptOnce(src){
     return new Promise((resolve,reject)=>{
       if ([...document.scripts].some(s => (s.src||"").includes(src))) return resolve();
@@ -20,7 +22,7 @@
     if (!window.XLSX) throw new Error("SheetJS failed to load");
   }
 
-  // ---------- UI placement ----------
+  // ---------- place Step 4 card visually after current Step 3 ----------
   function findStep3Card(){
     const hs = Array.from(document.querySelectorAll('h1,h2,h3,h4,strong,b,.title,.header'));
     for (const h of hs){
@@ -78,13 +80,22 @@
     return step4;
   }
 
-  // ---------- helpers for parsing ----------
+  // ---------- parsing helpers ----------
+  function safeRowCount(ws){ return (ws && typeof ws.rowCount === 'number' && ws.rowCount > 0) ? ws.rowCount : 5000; }
+  function getCellValue(ws,r,c){
+    try{
+      const cell = ws && typeof ws.getCell === 'function' ? ws.getCell(r,c) : null;
+      const v = cell ? (cell.value ?? '') : '';
+      return (v === null || v === undefined) ? '' : String(v);
+    }catch{ return ''; }
+  }
+
   function find_header_in_col_a(ws, headers){
     const targets = headers.map(h => String(h).toLowerCase().trim());
-    const max = ws.rowCount || 5000;
-    for (let r=1;r<=max;r++){
-      const v = ws.getCell(r,1).value;
-      const s = String(v||'').toLowerCase().trim();
+    const max = safeRowCount(ws);
+    for (let r=1; r<=max; r++){
+      const s = getCellValue(ws,r,1).toLowerCase().trim();
+      if (!s) continue;
       if (targets.includes(s)) return r;
     }
     return null;
@@ -92,13 +103,13 @@
 
   function extract_list_below(ws, headerRow, skipRows=1){
     const out=[]; let blanks=0;
-    // start below header (skip instruction row by default)
-    for (let r=headerRow+1+skipRows; r<=Math.max(headerRow+1+skipRows+5000, headerRow+50); r++){
-      const cell = ws.getCell(r,1);
-      if (!cell) { blanks++; if (blanks>=3) break; continue; }
-      const s = String((cell.value==null?'':cell.value)).trim();
-      if (!s){ blanks++; if (blanks>=3) break; }
-      else {
+    const start = headerRow + 1 + skipRows;
+    const end = Math.max(start + 50, start + 5000); // bounded sweep
+    for (let r=start; r<=end; r++){
+      const s = getCellValue(ws,r,1).trim();
+      if (!s){
+        blanks++; if (blanks>=3) break;
+      } else {
         blanks=0;
         const low = s.toLowerCase();
         if (!/^enter\s|^type\s|^do not/i.test(low)) out.push(s);
@@ -114,7 +125,8 @@
     const badName=/(example|instruction|cover|template)/i;
     const goodName=/(your\s+business|business)/i;
     let best=null,bestScore=-Infinity;
-    for(const ws of wb.worksheets){
+    const sheets = Array.isArray(wb?.worksheets) ? wb.worksheets : [];
+    for(const ws of sheets){
       const name=(ws.name||'').trim();
       let score=0;
       if(goodName.test(name))score+=5;
@@ -134,11 +146,11 @@
     const buf=await file.arrayBuffer();
     const wbRaw=XLSX.read(buf,{type:'array'});
     const workbook={worksheets:wbRaw.SheetNames.map(n=>{
-      const ws=XLSX.utils.sheet_to_json(wbRaw.Sheets[n],{header:1,defval:''});
+      const grid=XLSX.utils.sheet_to_json(wbRaw.Sheets[n],{header:1,defval:''});
       return {
         name:n,
-        rowCount:ws.length,
-        getCell:(r,c)=>({value:(ws[r-1]&&ws[r-1][c-1])||''})
+        rowCount:grid.length,
+        getCell:(r,c)=>({ value:(grid[r-1] && grid[r-1][c-1]) ?? '' })
       };
     })};
     const pick=chooseBestSheet(workbook);
@@ -149,75 +161,101 @@
     return {rooms,owners,sheetUsed:pick.name,foundRoomHeader:!!pick.rHdr,foundOwnerHeader:!!pick.uHdr};
   }
 
-  // ---------- ExcelJS patch (safer) ----------
+  // ---------- ExcelJS injection (ultra-safe) ----------
   function writeColumnValuesSafe(ws, colIndex, startRow, values){
-    if (!ws || !values || !values.length) return;
+    if (!ws || !Array.isArray(values) || values.length === 0) return;
     let r = startRow;
     for (const v of values){
-      const cell = ws.getCell(r++, colIndex);
-      // Write empty string instead of null to avoid internal slice() paths
-      cell.value = (v == null ? '' : v);
+      try {
+        const cell = ws.getCell(r++, colIndex);
+        cell.value = (v == null ? '' : v); // use '' not null
+      } catch(e) {
+        // keep going; don't abort export
+        console.warn('[Step4] write cell failed', e);
+      }
     }
   }
-
   function clearColumnRangeSafe(ws, colIndex, startRow, endRow){
     if (!ws) return;
-    for (let r = startRow; r <= endRow; r++){
-      const cell = ws.getCell(r, colIndex);
-      cell.value = ''; // safer than null
+    for (let r=startRow; r<=endRow; r++){
+      try {
+        ws.getCell(r, colIndex).value = '';
+      } catch(e) { /* ignore */ }
     }
   }
-
+  function isWorksheet(obj){
+    return obj && typeof obj.getCell === 'function' && typeof obj.getRow === 'function';
+  }
   function applyListsToWorkbook(workbook, lists){
     try{
-      if(!workbook || !lists) return;
-      const wsName = 'Lists';
-      let ws = workbook.getWorksheet && workbook.getWorksheet(wsName);
-      if (!ws && workbook.addWorksheet) ws = workbook.addWorksheet(wsName);
-      if (!ws) return; // give up quietly if worksheet API not present
+      if (!workbook || !lists) return;
+      const getWS = (name)=>{
+        try {
+          return (typeof workbook.getWorksheet === 'function') ? workbook.getWorksheet(name) : null;
+        }catch{ return null; }
+      };
+      const addWS = (name)=>{
+        try {
+          return (typeof workbook.addWorksheet === 'function') ? workbook.addWorksheet(name) : null;
+        }catch{ return null; }
+      };
+
+      let ws = getWS('Lists');
+      if (!isWorksheet(ws)) ws = addWS('Lists');
+      if (!isWorksheet(ws)) return; // silently bail if cannot obtain a worksheet
 
       const rooms = Array.isArray(lists.rooms) ? lists.rooms : [];
       const owners = Array.isArray(lists.owners) ? lists.owners : [];
+      if (rooms.length === 0 && owners.length === 0) return;
 
-      // Clear a reasonable block only if we actually plan to write
       const clearRows = Math.max(rooms.length, owners.length, 100);
       clearColumnRangeSafe(ws, 2, 2, 1 + clearRows); // B2..B{clear}
-      clearColumnRangeSafe(ws, 5, 2, 1 + clearRows); // E2..E{clear}
+      clearColumnRangeSafe(ws, 5, 2, 2 + clearRows); // E2..E{clear}
 
-      // Write new values
-      writeColumnValuesSafe(ws, 2, 2, rooms);  // Rooms -> B2...
-      writeColumnValuesSafe(ws, 5, 2, owners); // Owners -> E2...
+      writeColumnValuesSafe(ws, 2, 2, rooms);
+      writeColumnValuesSafe(ws, 5, 2, owners);
     }catch(e){
       console.warn('[Step4] applyListsToWorkbook skipped:', e);
     }
   }
 
   function patchExcelJSOnce(){
-    if(window.__TS_STEP4_PATCHED__)return;
-    window.__TS_STEP4_PATCHED__=true;
+    if (window.__TS_STEP4_PATCHED_V5__) return;
+    window.__TS_STEP4_PATCHED_V5__ = true;
 
-    const ExcelJS = window.ExcelJS;
-    if (!ExcelJS || !ExcelJS.Workbook || !ExcelJS.Workbook.prototype || !ExcelJS.Workbook.prototype.xlsx){
-      // Retry later if ExcelJS not ready yet
-      setTimeout(patchExcelJSOnce, 600);
-      return;
-    }
-
-    const origWriteBuffer = ExcelJS.Workbook.prototype.xlsx.writeBuffer;
-    if (typeof origWriteBuffer !== 'function') return;
-
-    ExcelJS.Workbook.prototype.xlsx.writeBuffer = function(){
-      try{
-        const data = window.__TS_STEP4_LISTS;
-        if (data && (Array.isArray(data.rooms) || Array.isArray(data.owners))){
-          applyListsToWorkbook(this, data);
-        }
-      }catch(e){
-        console.warn('[Step4] Injection skipped (writeBuffer):', e);
+    // Wait until ExcelJS exists
+    const tryPatch = ()=>{
+      const ExcelJS = window.ExcelJS;
+      if (!ExcelJS || !ExcelJS.Workbook || !ExcelJS.Workbook.prototype || !ExcelJS.Workbook.prototype.xlsx){
+        setTimeout(tryPatch, 500);
+        return;
       }
-      return origWriteBuffer.apply(this, arguments);
+      const proto = ExcelJS.Workbook.prototype;
+      const origWriteBuffer = proto.xlsx.writeBuffer;
+
+      if (typeof origWriteBuffer !== 'function'){
+        // nothing to patch
+        return;
+      }
+
+      // Prevent double-patching
+      if (proto.__ts_step4_wrapped__) return;
+      proto.__ts_step4_wrapped__ = true;
+
+      proto.xlsx.writeBuffer = function(){
+        try{
+          const lists = window.__TS_STEP4_LISTS;
+          if (lists && (Array.isArray(lists.rooms) || Array.isArray(lists.owners))){
+            applyListsToWorkbook(this, lists);
+          }
+        }catch(e){
+          console.warn('[Step4] writeBuffer hook skipped:', e);
+        }
+        return origWriteBuffer.apply(this, arguments);
+      };
+      console.log('[Step4] Patched writeBuffer (v5)');
     };
-    console.log('[Step4] ExcelJS patched for Rooms/Owners injection (safe)');
+    tryPatch();
   }
 
   // ---------- Wire UI ----------
@@ -227,7 +265,7 @@
     if(step3&&step3.parentElement)step3.parentElement.insertBefore(step4,step3.nextSibling);
     else document.body.appendChild(step4);
 
-    // Patch Excel export so your existing "Generate" auto-injects lists
+    // Patch export
     patchExcelJSOnce();
 
     const file=document.getElementById('ts-step4-file');
