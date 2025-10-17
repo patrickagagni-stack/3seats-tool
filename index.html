@@ -57,6 +57,48 @@ function setStatusBanner(msg){
 }
 </script>
 </head>
+<style>
+  /* Hide Save/Load Mapping buttons (Steps 2 & 4 — optionally Step 6) */
+  .ts-hide-mapping {
+    display: none !important;
+  }
+</style>
+
+<script>
+(function(){
+  function hideByText(root, texts) {
+    const btns = root.querySelectorAll('button, .button, input[type="button"], input[type="submit"]');
+    btns.forEach(el => {
+      const t = (el.textContent || el.value || '').trim().toLowerCase();
+      if (texts.some(x => t === x || t.includes(x))) {
+        el.classList.add('ts-hide-mapping');
+      }
+    });
+  }
+
+  function sectionByHeading(n) {
+    // Finds the section that starts with "n)"
+    const heads = Array.from(document.querySelectorAll('h1,h2,h3,h4,strong,b,.title,.header'));
+    for (const h of heads) {
+      const txt = (h.textContent || '').trim().toLowerCase();
+      if (txt.startsWith(n + ')')) {
+        return h.closest('section, .step, .card, .panel, .box, .container, .chunk, .ts-card, div') || h.parentElement;
+      }
+    }
+    return null;
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const targets = ['save mapping','load mapping'];
+    // Step 2
+    const s2 = sectionByHeading('2'); if (s2) hideByText(s2, targets);
+    // Step 4
+    const s4 = sectionByHeading('4'); if (s4) hideByText(s4, targets);
+    // If you also want to hide them in Step 6, uncomment:
+    // const s6 = sectionByHeading('6'); if (s6) hideByText(s6, targets);
+  });
+})();
+</script>
 <body>
   <header>
     <h1>Event Data Import Tool</h1>
