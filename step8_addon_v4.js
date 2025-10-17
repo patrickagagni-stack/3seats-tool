@@ -75,16 +75,25 @@ function findStep7Card(){
     if (row7 && row7.classList.length) row7.classList.forEach(c => row.classList.add(c));
     else { row.style.display='flex'; row.style.flexWrap='wrap'; row.style.alignItems='center'; row.style.gap='10px'; }
 
-    const name = document.createElement('input');
-    name.id = 'ts-export-base';
-    name.placeholder = 'master_output';
-    const refInput = step7 && step7.querySelector('input[type="text"], .input, input, select, textarea');
-    if (refInput){
-      if (refInput.classList.length) refInput.classList.forEach(c => name.classList.add(c));
-      const cs = getComputedStyle(refInput);
-      name.style.minWidth = '280px';
-      name.style.padding = cs.padding; name.style.border = cs.border; name.style.borderRadius = cs.borderRadius;
-    }
+    // --- Input field (matches Step 7 styling) ---
+const name = document.createElement('input');
+name.id = 'ts-export-base';
+name.placeholder = 'master_output (in Google)';
+
+// Copy Step 7 input's classes so it inherits the dark theme
+const refInput = step7 && step7.querySelector('input[type="text"], .input, input, select, textarea');
+if (refInput) {
+  if (refInput.classList.length) refInput.classList.forEach(c => name.classList.add(c));
+  const cs = getComputedStyle(refInput);
+  name.style.minWidth = '280px';
+  name.style.padding = cs.padding;
+  name.style.border = cs.border;
+  name.style.borderRadius = cs.borderRadius;
+  // Match the dark input background + text color
+  name.style.backgroundColor = cs.backgroundColor || '#1e1e2a';
+  name.style.color = cs.color || '#e5e7eb';
+}
+
 
     const btn = document.createElement('button');
     btn.id = 'ts-export-btn';
