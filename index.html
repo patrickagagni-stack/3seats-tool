@@ -1021,5 +1021,273 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 </script>
 <!-- === End: 3seats Exporter === -->
 
+<!-- ===== 3seats: Exporter (Events as values, Lists with formulas) ===== -->
+<div id="three-seats-export-card" style="max-width:900px;margin:24px auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.04);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;">
+  <div style="font-weight:700;font-size:16px;margin-bottom:4px;">Export to Google Sheet</div>
+  <div style="color:#6b7280;font-size:13px;margin-bottom:10px;">
+    Pick the Excel you generated → Google converts it → we copy <b>Events</b> as values and <b>Lists</b> with formulas preserved into your Template copy.
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <input id="ts-export-base" type="text" placeholder="master_output"
+           style="padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;min-width:280px;">
+    <button id="ts-export-btn" style="appearance:none;border:0;background:#111827;color:#fff;padding:10px 14px;border-radius:10px;cursor:pointer;font-weight:600;">
+      Export to Google Sheet
+    </button>
+    <span id="ts-export-status" style="color:#6b7280;font-size:12px;">Idle</span>
+  </div>
+</div>
+
+<!-- Load Google APIs (safe to include even if already present) -->
+<script async defer src="https://apis.google.com/js/api.js"></script>
+<script async defer src="https://accounts.google.com/gsi/client"></script>
+
+<script>
+(function(){
+  // --- CONFIG ---
+  const TEMPLATE_ID = "1ft0PuCB3EneQ8vW9lFv78c1KBC1giUOGTAmLsa8bETE";
+  const CLIENT_ID   = "7010858919-jq4n8blq1b73o26pq3h4n0uk46roqfag.apps.googleusercontent.com";
+
+  const $ = (id)=> document.getElementById(id);
+  const statusEl = $("ts-export-status");
+  const setStatus = (m)=> statusEl && (statusEl.textContent = m);
+
+  function pickExcel() {
+    return new Promise((resolve)=>{
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      inp.style.position = 'fixed'; inp.style.left = '-9999px';
+      document.body.appendChild(inp);
+      inp.addEventListener('change', ()=> resolve(inp.files && inp.files[0] ? inp.files[0] : null));
+      inp.click();
+    });
+  }
+
+  async function ensureGapi() {
+    setStatus("Loading Google APIs…");
+    await new Promise((resolve,reject)=>{ 
+      gapi.load("client", async ()=>{ try{ await gapi.client.init({}); resolve(); }catch(e){ reject(e); } }); 
+    });
+    await gapi.client.load("https://www.googleapis.com/discovery/v1/apis/drive/v3/rest");
+    await gapi.client.load("https://sheets.googleapis.com/$discovery/rest?version=v4");
+  }
+
+  async function ensureToken() {
+    setStatus("Getting Google token…");
+    return await new Promise((resolve,reject)=>{
+      const tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets",
+        use_fedcm_for_prompt: true,
+        callback: ()=>{}
+      });
+      tokenClient.callback = (r)=> r && r.access_token ? resolve(r.access_token) : reject(new Error(r?.error||"No token"));
+      tokenClient.requestAccessToken({prompt:"consent"});
+    });
+  }
+
+  async function waitReady(id){
+    for (let i=1;i<=10;i++){
+      try { const r = await gapi.client.sheets.spreadsheets.get({ spreadsheetId:id, fields:"spreadsheetId" }); if (r?.result?.spreadsheetId) return; } catch(_){}
+      await new Promise(r=>setTimeout(r, 250*i));
+    }
+    throw new Error("Google Sheet not ready.");
+  }
+
+  async function ensureSheet(spreadsheetId, title){
+    const r = await gapi.client.sheets.spreadsheets.get({
+      spreadsheetId, fields: "sheets(properties(sheetId,title))"
+    });
+    const found = (r.result.sheets||[]).find(s => s.properties.title === title);
+    if (found) return found.properties;
+    const add = await gapi.client.sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      resource: { requests: [{ addSheet: { properties: { title } } }] }
+    });
+    return add.result?.replies?.[0]?.addSheet?.properties;
+  }
+
+  async function clearValues(spreadsheetId, sheetTitle){
+    await gapi.client.sheets.spreadsheets.values.clear({
+      spreadsheetId, range: `${sheetTitle}!A1:ZZZ100000`
+    });
+  }
+
+  // Values helpers (Events)
+  async function readValues(spreadsheetId, sheetTitle){
+    const res = await gapi.client.sheets.spreadsheets.values.get({
+      spreadsheetId, range: `${sheetTitle}!A1:ZZZ100000`
+    });
+    return res.result.values || [];
+  }
+  async function writeValues(spreadsheetId, sheetTitle, grid){
+    if (!grid || !grid.length) return;
+    await gapi.client.sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${sheetTitle}!A1`,
+      valueInputOption: "RAW",
+      resource: { values: grid, majorDimension: "ROWS" }
+    });
+  }
+
+  // Formulas helpers (Lists)
+  async function readCellsWithFormulas(spreadsheetId, sheetTitle){
+    const res = await gapi.client.sheets.spreadsheets.get({
+      spreadsheetId,
+      ranges: [`${sheetTitle}!A1:ZZZ100000`],
+      includeGridData: true,
+      fields: "sheets(data(rowData(values(userEnteredValue))))"
+    });
+    const sheet = res.result.sheets && res.result.sheets[0];
+    const data = sheet && sheet.data && sheet.data[0];
+    return (data && data.rowData) ? data.rowData : [];
+  }
+  async function writeCellsWithFormulas(spreadsheetId, sheetTitle, rowData){
+    const meta = await gapi.client.sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: "sheets(properties(sheetId,title))"
+    });
+    const sheet = (meta.result.sheets||[]).find(s => s.properties.title === sheetTitle);
+    if (!sheet) throw new Error(`Destination sheet not found: ${sheetTitle}`);
+    const sheetId = sheet.properties.sheetId;
+
+    const sanitizedRows = (rowData || []).map(r => ({
+      values: (r.values || []).map(c => {
+        const uev = (c && c.userEnteredValue) ? c.userEnteredValue : {};
+        const v = {};
+        if (typeof uev.formulaValue === "string")      v.formulaValue = uev.formulaValue;
+        else if (typeof uev.stringValue  === "string") v.stringValue  = uev.stringValue;
+        else if (typeof uev.numberValue  === "number") v.numberValue  = uev.numberValue;
+        else if (typeof uev.boolValue    === "boolean")v.boolValue    = uev.boolValue;
+        else                                           v.stringValue  = "";
+        return { userEnteredValue: v };
+      })
+    }));
+
+    await gapi.client.sheets.spreadsheets.values.clear({
+      spreadsheetId, range: `${sheetTitle}!A1:ZZZ100000`
+    });
+
+    await gapi.client.sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      resource: {
+        requests: [{
+          updateCells: {
+            range: { sheetId: sheetId, startRowIndex: 0, startColumnIndex: 0 },
+            rows: sanitizedRows,
+            fields: "userEnteredValue"
+          }
+        }]
+      }
+    });
+  }
+
+  async function uploadAndConvertXlsx(blob, name){
+    const tokenObj = gapi.client.getToken && gapi.client.getToken();
+    const accessToken = tokenObj && tokenObj.access_token ? tokenObj.access_token : null;
+    if (!accessToken) throw new Error("Missing access token");
+
+    const metadata = {
+      name: name + " (Converted)",
+      mimeType: "application/vnd.google-apps.spreadsheet"
+    };
+    const form = new FormData();
+    form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+    form.append("file", blob, (blob && blob.name) ? blob.name : (name + ".xlsx"));
+
+    const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + accessToken },
+      body: form
+    });
+    if (!res.ok){
+      const t = await res.text().catch(()=>"(no body)");
+      throw new Error("Upload failed: " + res.status + " " + t);
+    }
+    const json = await res.json();
+    return json.id;
+  }
+
+  function findTitle(titles, candidates){
+    const lc = titles.map(t => t.toLowerCase());
+    for (const cand of candidates){
+      const i = lc.indexOf(cand.toLowerCase());
+      if (i >= 0) return titles[i];
+    }
+    return null;
+  }
+
+  async function exportNow(){
+    try{
+      // 1) Pick Excel first (gives immediate feedback)
+      setStatus("Pick the Excel you just downloaded from Generate…");
+      const picked = await pickExcel();
+      if (!picked){ setStatus("Canceled (no Excel picked)."); return; }
+
+      // 2) Auth & APIs
+      await ensureGapi();
+      const token = await ensureToken();
+      gapi.client.setToken({access_token: token});
+
+      // 3) Copy template
+      const baseName = (($("ts-export-base")?.value || document.getElementById("fileName")?.value || "master_output").trim()||"master_output").replace(/\s+/g,"_");
+      setStatus("Copying your template…");
+      const copyRes = await gapi.client.drive.files.copy({
+        fileId: TEMPLATE_ID, supportsAllDrives: true, fields: "id", resource: { name: baseName + " (Google Sheet)" }
+      });
+      const destId = copyRes.result.id;
+      await waitReady(destId);
+
+      // 4) Upload + convert the picked Excel
+      setStatus("Uploading & converting Excel…");
+      const convertedId = await uploadAndConvertXlsx(picked, baseName);
+
+      // 5) Detect source sheet titles
+      setStatus("Analyzing converted sheets…");
+      const meta = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: convertedId, fields: "sheets(properties(title))" });
+      const titles = (meta.result.sheets || []).map(s => s.properties.title);
+      const eventsTitle = findTitle(titles, ["Events","Event","Sheet1"]);
+      const listsTitle  = findTitle(titles, ["Lists","List"]);
+
+      // Ensure destination tabs exist
+      await ensureSheet(destId, "Events");
+      await ensureSheet(destId, "Lists");
+
+      // 6) Write Events (values)
+      if (eventsTitle){
+        setStatus("Copying Events (values)…");
+        const eventsGrid = await readValues(convertedId, eventsTitle);
+        await clearValues(destId, "Events");
+        await writeValues(destId, "Events", eventsGrid);
+      }
+
+      // 7) Write Lists (formulas preserved)
+      if (listsTitle){
+        setStatus("Copying Lists (formulas)…");
+        const listsRows = await readCellsWithFormulas(convertedId, listsTitle);
+        await writeCellsWithFormulas(destId, "Lists", listsRows);
+      }
+
+      // 8) Done
+      setStatus("Opening Google Sheet…");
+      window.open(`https://docs.google.com/spreadsheets/d/${destId}/edit`, "_blank");
+      setStatus("Done");
+    }catch(e){
+      console.error(e);
+      const msg = e?.result?.error?.message || e.message || String(e);
+      const dbg = e?.result ? JSON.stringify(e.result, null, 2) : "";
+      setStatus("Export failed: " + msg);
+      alert("Export failed: " + msg + (dbg ? "\n\n" + dbg : ""));
+    }
+  }
+
+  // Wire button
+  $("ts-export-btn")?.addEventListener('click', (e)=>{ e.preventDefault(); exportNow(); });
+
+  // Also expose a programmatic hook (optional)
+  window.exportToSheets = exportNow;
+})();
+</script>
+<!-- ===== /3seats: Exporter ===== -->
 </body>
 </html>
