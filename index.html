@@ -58,56 +58,38 @@ function setStatusBanner(msg){
 </script>
 </head>
 <style>
-  /* Hide Save/Load Mapping buttons (Steps 2 & 4 — optionally Step 6) */
+  /* Hide Save/Load Mapping buttons anywhere on the page */
   .ts-hide-mapping { display: none !important; }
 </style>
 
 <script>
 (function(){
-  function hideByText(root, texts) {
-    if (!root) return;
-    const btns = root.querySelectorAll('button, .button, input[type="button"], input[type="submit"]');
-    btns.forEach(el => {
-      const t = (el.textContent || el.value || '').trim().toLowerCase();
-      if (texts.some(x => t === x || t.includes(x))) {
+  // Hide any element that looks like a Save/Load Mapping control
+  function hideAllMappingButtons(root = document) {
+    const els = root.querySelectorAll('button, .button, input[type="button"], input[type="submit"], a, [role="button"]');
+    els.forEach(el => {
+      const txt = (el.textContent || el.value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (!txt) return;
+      if (txt.includes('save mapping') || txt.includes('load mapping')) {
         el.classList.add('ts-hide-mapping');
       }
     });
   }
 
-  function sectionByHeading(n) {
-    // Finds the section/card whose heading starts with "n)"
-    const heads = Array.from(document.querySelectorAll('h1,h2,h3,h4,strong,b,.title,.header'));
-    for (const h of heads) {
-      const txt = (h.textContent || '').trim().toLowerCase();
-      if (txt.startsWith(n + ')')) {
-        return h.closest('section, .step, .card, .panel, .box, .container, .chunk, .ts-card, div') || h.parentElement;
-      }
-    }
-    return null;
-  }
-
-  function hideMappingForStep(n) {
-    const targets = ['save mapping','load mapping'];
-    const sec = sectionByHeading(n);
-    if (sec) hideByText(sec, targets);
-  }
-
   document.addEventListener('DOMContentLoaded', () => {
-    // Initial hide (Step 2 is visible immediately; Step 4 might be collapsed)
-    hideMappingForStep('2');
-    hideMappingForStep('4');
+    // Initial pass
+    hideAllMappingButtons();
 
-    // Re-hide when DOM changes (e.g., Step 4 expands, content re-renders)
-    const mo = new MutationObserver(() => {
-      hideMappingForStep('4');
-      // Uncomment if you later want to also hide Step 6 dynamically:
-      // hideMappingForStep('6');
+    // Re-run when sections expand or UI re-renders
+    const mo = new MutationObserver(muts => {
+      // This is inexpensive; we just sweep and hide again
+      hideAllMappingButtons();
     });
-    mo.observe(document.body, { childList: true, subtree: true });
+    mo.observe(document.body, { childList: true, subtree: true, characterData: true });
   });
 })();
 </script>
+
 <body>
   <header>
     <h1>Event Data Import Tool</h1>
