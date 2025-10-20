@@ -1059,7 +1059,7 @@ try {
 </script>
 <!-- === End: 3seats Exporter === -->
 
-<script src="step8_addon_v4.js?v=5"></script>
+<script src="step8_addon_v4.js?v=6"></script>
 <script>
 (function () {
   function byHeadingIncludes(txt) {
@@ -1144,6 +1144,20 @@ try {
     [status.card, room.card, owner.card].forEach(c => {
       c.style.margin = '0 0 10px';
     });
+  });
+})();
+</script>
+<script>
+(function(){
+  function relabel(h, newNum){
+    const rest = (h.textContent || '').replace(/^\s*\d+\)\s*/, '');
+    h.textContent = `${newNum}) ${rest}`;
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    // Find the first H2 that starts with "7)"
+    const hs = Array.from(document.querySelectorAll('.card h2, h2'));
+    const cand = hs.find(h => /^\s*7\)\s*/.test((h.textContent||'')));
+    if (cand) relabel(cand, '5');
   });
 })();
 </script>
