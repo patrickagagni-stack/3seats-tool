@@ -1060,5 +1060,92 @@ try {
 <!-- === End: 3seats Exporter === -->
 
 <script src="step8_addon_v4.js?v=5"></script>
+<script>
+(function () {
+  function byHeadingIncludes(txt) {
+    txt = txt.toLowerCase();
+    return Array.from(document.querySelectorAll('.card h2')).map(h => ({
+      h, card: h.closest('.card'),
+      label: (h.textContent || '').trim()
+    })).filter(x => x.label.toLowerCase().includes(txt));
+  }
+
+  function makeStep4Container() {
+    const card = document.createElement('section');
+    card.className = 'card';
+    const h2 = document.createElement('h2');
+    h2.textContent = '4) Optional Mapping';
+    const content = document.createElement('div');
+    content.className = 'content';
+    content.style.paddingTop = '10px';
+    content.style.paddingBottom = '10px';
+
+    // toggle button
+    const row = document.createElement('div');
+    row.className = 'row wrap';
+    row.style.gap = '8px';
+    row.style.margin = '6px 0 10px';
+
+    const btn = document.createElement('button');
+    btn.className = 'btn';
+    btn.type = 'button';
+    btn.textContent = 'Show options';
+    btn.setAttribute('aria-expanded', 'false');
+
+    const wrap = document.createElement('div');
+    wrap.id = 'ts-step4-wrap';
+    wrap.style.display = 'none';
+    wrap.style.gap = '12px';
+    wrap.style.display = 'none';
+
+    btn.addEventListener('click', () => {
+      const open = wrap.style.display !== 'none';
+      wrap.style.display = open ? 'none' : 'grid';
+      btn.textContent = open ? 'Show options' : 'Hide options';
+      btn.setAttribute('aria-expanded', String(!open));
+    });
+
+    row.appendChild(btn);
+    content.appendChild(row);
+    content.appendChild(wrap);
+    card.appendChild(h2);
+    card.appendChild(content);
+    return { card, wrap };
+  }
+
+  function relabel(h2El, prefix) {
+    const txt = (h2El.textContent || '').trim();
+    // replace the leading number + ) if present
+    const rest = txt.replace(/^\s*\d+\)\s*/, '');
+    h2El.textContent = `${prefix}) ${rest}`;
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    // find current 4/5/6
+    const status = byHeadingIncludes('status mapping')[0];
+    const room   = byHeadingIncludes('room mapping')[0];
+    const owner  = byHeadingIncludes('owner mapping')[0];
+    if (!status || !room || !owner) return; // graceful no-op if headings change
+
+    // build container and insert it before current step-4 (status)
+    const { card, wrap } = makeStep4Container();
+    status.card.parentElement.insertBefore(card, status.card);
+
+    // move cards into the wrapper and relabel
+    relabel(status.h, '4a');
+    relabel(room.h,   '4b');
+    relabel(owner.h,  '4c');
+
+    wrap.appendChild(status.card);
+    wrap.appendChild(room.card);
+    wrap.appendChild(owner.card);
+
+    // tighten spacing a bit so it feels “nested”
+    [status.card, room.card, owner.card].forEach(c => {
+      c.style.margin = '0 0 10px';
+    });
+  });
+})();
+</script>
 </body>
 </html>
