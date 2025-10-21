@@ -227,21 +227,40 @@
         status.textContent="Cleaning up…";
         await driveDelete(tempId); tempId = null;
 
-        status.innerHTML = `✅ Done. <a target="_blank" rel="noopener" href="https://docs.google.com/spreadsheets/d/${destId}">Open your Google Sheet</a>`;
-      }catch(e){
+              // ---- success ----
+        const gUrl = `https://docs.google.com/spreadsheets/d/${destId}`;
+        status.innerHTML =
+          `✅ Done. <a target="_blank" rel="noopener" href="${gUrl}">Open your Google Sheet</a>`;
+
+        // Automatically open the Google Sheet in a new tab after export
+        try {
+          // Small delay ensures token cleanup doesn’t block the open
+          setTimeout(() => window.open(gUrl, "_blank", "noopener"), 250);
+        } catch (e) {
+          console.warn("Auto-open suppressed:", e);
+        }
+      } catch (e) {
         console.error(e);
-        const msg = e?.result?.error?.message || e?.details || e?.message || JSON.stringify(e);
-        status.textContent = "❌ Export failed: " + msg;
-        // try to delete temp to keep Drive tidy
-        if (tempId) driveDelete(tempId);
+        const msg =
+          e?.result?.error?.message ||
+          e?.details ||
+          e?.message ||
+          JSON.stringify(e);
+        status.textContent =
+          "❌ Export failed: " +
+          msg +
+          (msg?.includes("idpiframe")
+            ? " (Tip: make sure the Google sign-in pop-up wasn't blocked.)"
+            : "");
       }
     });
 
     return host;
   }
 
-  function inject(){
-    const anchor = findExportCard(); if (!anchor) return;
+  function inject() {
+    const anchor = findExportCard();
+    if (!anchor) return;
     anchor.parentElement.insertBefore(buildStep6Card(), anchor.nextSibling);
   }
 
