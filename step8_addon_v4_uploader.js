@@ -1,6 +1,5 @@
-// step8_addon_v4_uploader.js — Step "6) Export to Google Sheets" using GIS (v10)
-// Strategy: upload XLSX -> Google Sheet (conversion preserves formulas/formatting)
-// then copy ENTIRE tabs into a fresh copy of your template; delete temp; done.
+// step8_addon_v4_uploader.js — Step "6) Export to Google Sheets" (UI-aligned)
+// Logic unchanged; only Step 6 UI (note + input row) styling is adjusted for alignment/spacing.
 (function(){
   if (window.__TS_STEP8_V4U__) return; window.__TS_STEP8_V4U__ = true;
 
@@ -36,10 +35,6 @@
     if (!google?.accounts?.oauth2) throw new Error("Google Identity Services failed to load");
   }
 
-  async function ensureSheetJS(){ // Only used to sanity-check names if needed
-    await loadScriptOnce("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js");
-  }
-
   // ---------- auth via GIS ----------
   let tokenClient=null;
   function getAccessToken({forcePrompt=false}={}){
@@ -57,7 +52,7 @@
   }
 
   // ---------- Drive helpers ----------
-  async function driveCopyTemplate(name, token){
+  async function driveCopyTemplate(name){
     const res = await gapi.client.drive.files.copy({
       fileId: TEMPLATE_ID,
       supportsAllDrives: true,
@@ -99,9 +94,7 @@
   }
 
   async function driveDelete(fileId){
-    try{
-      await gapi.client.drive.files.delete({ fileId });
-    }catch(e){ /* no-op cleanup */ }
+    try{ await gapi.client.drive.files.delete({ fileId }); }catch(_e){}
   }
 
   // ---------- Sheets helpers ----------
@@ -112,7 +105,7 @@
   function findSheetIdByTitle(props, title){
     const p = props.find(p => (p.title||"").toLowerCase() === title.toLowerCase());
     return p ? p.sheetId : null;
-  }
+    }
 
   async function copyTabTo(targetSpreadsheetId, sourceSpreadsheetId, sourceSheetId){
     const res = await gapi.client.sheets.spreadsheets.sheets.copyTo({
@@ -120,7 +113,7 @@
       sheetId: sourceSheetId,
       resource: { destinationSpreadsheetId: targetSpreadsheetId }
     });
-    return res.result.sheetId; // new sheetId in destination
+    return res.result.sheetId;
   }
 
   async function batchUpdate(spreadsheetId, requests){
@@ -131,9 +124,7 @@
     });
   }
 
-  async function replaceSheetWithCopy({
-    destId, destTitle, srcId, srcTitle
-  }){
+  async function replaceSheetWithCopy({ destId, destTitle, srcId, srcTitle }){
     const destProps = await getSheetsMeta(destId);
     const srcProps  = await getSheetsMeta(srcId);
 
@@ -141,85 +132,106 @@
     if (!srcSheetId) throw new Error(`Source sheet "${srcTitle}" not found in converted file.`);
     const destSheetId = findSheetIdByTitle(destProps, destTitle);
 
-    // Copy source tab into destination (creates a new sheet at the end)
     const newDestSheetId = await copyTabTo(destId, srcId, srcSheetId);
 
-    // Rename new sheet to the expected title; delete old destination sheet if present; and position new tab
     const requests = [];
-
-    // If an old sheet with destTitle exists, delete it
-    if (destSheetId){
-      requests.push({ deleteSheet: { sheetId: destSheetId } });
-    }
-
-    // Rename the copied sheet to destTitle & move it near the front (index 0 or 1)
+    if (destSheetId) requests.push({ deleteSheet: { sheetId: destSheetId } });
     requests.push({
       updateSheetProperties: {
         properties: { sheetId: newDestSheetId, title: destTitle, index: 0 },
         fields: "title,index"
       }
     });
-
     await batchUpdate(destId, requests);
   }
 
-  // ---------- UI ----------
+  // ---------- locate Step 5 card to insert after ----------
   function findExportCard(){
     const hs=[...document.querySelectorAll("h1,h2,h3,h4,strong,b,.title,.header")];
     for(const h of hs){
       const t=(h.textContent||"").toLowerCase();
-      if (t.includes("export")){
+      if (t.includes("export") && !t.includes("google")){
         return h.closest("section,.step,.card,.panel,.box,.container,.chunk,.ts-card,div") || h.parentElement;
       }
     }
     return null;
   }
 
+  // ---------- Step 6 UI ----------
   function buildStep6Card(){
     const host=document.createElement("section"); host.className="card"; host.id="ts-step6-card";
     const h2=document.createElement("h2"); h2.textContent="6) Export to Google Sheets"; host.appendChild(h2);
 
-    const content=document.createElement("div"); content.className="content"; content.style.padding="8px 0 12px";
+    const content=document.createElement("div"); content.className="content";
+
+    // Note (keep your exact text)
     const note=document.createElement("div");
-    note.innerHTML="Pick the Excel you generated. We’ll <b>convert</b> it to a temporary Google Sheet (keeping formulas & formatting), copy both tabs into your template copy, then clean up.";// style & align the note and input row uniformly
-note.style.margin = "4px 0 12px 12px";     // small indent, same left as header text
-note.style.fontSize = "0.9rem";
-note.style.lineHeight = "1.45";
-note.style.color = "#9ca3af";              // gray-400 for muted tone
-note.style.maxWidth = "95%";
-
-// tighten the input row + make fields sit side-by-side
-row.style.gap = "10px";
-row.style.margin = "0 0 8px 12px";         // indent same as note
-row.style.alignItems = "center";
-
-// narrow the inputs so both fit one line
-file.style.width = "190px";
-name.style.width = "160px";
-
-    // style the explanatory line to be subtle and uniform
-    note.style.margin = "0 0 8px";
-    note.style.fontSize = "0.95rem";
-    note.style.lineHeight = "1.4";
-    note.style.color = "#6b7280"; // gray-500
+    note.innerHTML = "Pick the Excel you generated. We’ll <b>convert</b> it to a temporary Google Sheet (keeping formulas &amp; formatting), copy both tabs into your template copy, then clean up.";
+    // --- style JUST this line, and align under header text ---
+    note.style.margin    = "4px 0 12px 12px";  // indent matches header text start
+    note.style.fontSize  = "0.9rem";
+    note.style.lineHeight= "1.45";
+    note.style.color     = "#9ca3af";         // subtle gray
+    note.style.maxWidth  = "95%";
     content.appendChild(note);
 
+    // Single-line input row (file + name + button)
     const row=document.createElement("div");
-    Object.assign(row.style,{display:"flex",flexWrap:"wrap",alignItems:"center",gap:"8px",marginTop:"8px"});
+    // Use flex intentionally (one line), and indent to align with header text start
+    row.style.display      = "flex";
+    row.style.flexWrap     = "nowrap";
+    row.style.alignItems   = "center";
+    row.style.gap          = "10px";
+    row.style.margin       = "0 0 8px 12px";
 
-    const file=document.createElement("input"); file.type="file";
-    file.accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-    file.id="ts-step6-file"; row.appendChild(file);
+    // File picker (compact)
+    const fileLabel = document.createElement("label");
+    fileLabel.style.display = "inline-flex";
+    fileLabel.style.alignItems = "center";
+    fileLabel.style.gap = "6px";
 
-    const name=document.createElement("input"); name.type="text"; name.placeholder="master_output (in Google)";
-    name.id="ts-step6-name"; name.value="master_output"; name.style.minWidth="240px"; row.appendChild(name);
+    const fileSpan  = document.createElement("span");
+    fileSpan.textContent = "Choose File";
+    fileSpan.style.opacity = "0.8";
 
-    const btn=document.createElement("button"); btn.type="button"; btn.textContent="Export to Google Sheet"; btn.className="btn"; row.appendChild(btn);
+    const file = document.createElement("input");
+    file.type = "file";
+    file.accept = ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    file.id = "ts-step6-file";
+    // narrow the control so row fits in one line on typical widths
+    file.style.maxWidth = "190px";
 
-    const status=document.createElement("div"); status.id="ts-step6-status"; status.style.marginTop="8px"; status.textContent="Ready.";
+    fileLabel.appendChild(fileSpan);
+    fileLabel.appendChild(file);
+    row.appendChild(fileLabel);
 
-    content.appendChild(row); content.appendChild(status); host.appendChild(content);
+    // Name input (compact)
+    const name = document.createElement("input");
+    name.type = "text";
+    name.placeholder = "master_output";
+    name.id = "ts-step6-name";
+    name.value = "master_output";
+    name.style.width = "160px";
+    name.style.minWidth = "140px";
+    row.appendChild(name);
 
+    // Primary action button
+    const btn=document.createElement("button");
+    btn.type="button";
+    btn.textContent="Export to Google Sheet";
+    btn.className="btn primary";
+    row.appendChild(btn);
+
+    const status=document.createElement("div");
+    status.id="ts-step6-status";
+    status.style.margin = "8px 0 0 12px";  // align with the row/note indent
+    status.textContent="Ready.";
+
+    content.appendChild(row);
+    content.appendChild(status);
+    host.appendChild(content);
+
+    // ---------- click handler ----------
     btn.addEventListener("click", async ()=>{
       let tempId = null;
       try{
@@ -247,31 +259,15 @@ name.style.width = "160px";
         status.textContent="Cleaning up…";
         await driveDelete(tempId); tempId = null;
 
-              // ---- success ----
         const gUrl = `https://docs.google.com/spreadsheets/d/${destId}`;
-        status.innerHTML =
-          `✅ Done. <a target="_blank" rel="noopener" href="${gUrl}">Open your Google Sheet</a>`;
-
-        // Automatically open the Google Sheet in a new tab after export
-        try {
-          // Small delay ensures token cleanup doesn’t block the open
-          setTimeout(() => window.open(gUrl, "_blank", "noopener"), 250);
-        } catch (e) {
-          console.warn("Auto-open suppressed:", e);
-        }
+        status.innerHTML = `✅ Done. <a target="_blank" rel="noopener" href="${gUrl}">Open your Google Sheet</a>`;
+        try { setTimeout(() => window.open(gUrl, "_blank", "noopener"), 250); } catch(_) {}
       } catch (e) {
         console.error(e);
-        const msg =
-          e?.result?.error?.message ||
-          e?.details ||
-          e?.message ||
-          JSON.stringify(e);
+        const msg = e?.result?.error?.message || e?.details || e?.message || JSON.stringify(e);
         status.textContent =
-          "❌ Export failed: " +
-          msg +
-          (msg?.includes("idpiframe")
-            ? " (Tip: make sure the Google sign-in pop-up wasn't blocked.)"
-            : "");
+          "❌ Export failed: " + msg +
+          (msg?.includes("idpiframe") ? " (Tip: make sure the Google sign-in pop-up wasn't blocked.)" : "");
       }
     });
 
