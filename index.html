@@ -2,6 +2,14 @@
 <html lang="en">
 <head>
   <style>
+    /* Step 6 visual match to other cards */
+    #ts-step6-card h2 { color: var(--text-strong, #cbd5e1); font-size: 1.1rem; }
+    #ts-step6-card .content input[type="text"]{ width: 240px; }
+    #ts-step6-card .content input[type="file"]{ width: auto; }
+    #ts-step6-card .content .btn{ padding: 10px 14px; }
+  </style>
+
+  <style>
     /* Hide legacy Step-5 exporter button if present */
     #exportToSheetsBtn { display: none !important; }
   </style>
@@ -835,7 +843,7 @@ autoFitWidths(rs,[1,2,4,5,7,9,10,11,12]);
 <script async defer src="https://accounts.google.com/gsi/client"></script>
 
 <script src="./relabel_step7_to_5.js?v=2"></script>
-<script src="./step8_addon_v4_uploader.js?v=7"></script>
+<script src="./step8_addon_v4_uploader.js?v=8"></script>
 </body>
 </html>
 
