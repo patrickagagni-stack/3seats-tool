@@ -1,5 +1,6 @@
-// step8_addon_v4_uploader.js — Step "6) Export to Google Sheets" using GIS (v9)
-// Copies formulas in Lists (e.g., columns I–L) from Excel into Google Sheets.
+// step8_addon_v4_uploader.js — Step "6) Export to Google Sheets" using GIS (v10)
+// Strategy: upload XLSX -> Google Sheet (conversion preserves formulas/formatting)
+// then copy ENTIRE tabs into a fresh copy of your template; delete temp; done.
 (function(){
   if (window.__TS_STEP8_V4U__) return; window.__TS_STEP8_V4U__ = true;
 
@@ -19,7 +20,7 @@
   async function ensureGapi(){
     await loadScriptOnce("https://apis.google.com/js/api.js");
     if (!window.gapi) throw new Error("gapi failed to load");
-    if (!gapi.client) await new Promise(res=>gapi.load("client",res));
+    if (!gapi.client) await new Promise(res=>gapi.load("client", res));
     if (!gapi.client.__ts_inited){
       await gapi.client.init({
         discoveryDocs:[
@@ -34,42 +35,12 @@
     await loadScriptOnce("https://accounts.google.com/gsi/client");
     if (!google?.accounts?.oauth2) throw new Error("Google Identity Services failed to load");
   }
-  async function ensureSheetJS(){
+
+  async function ensureSheetJS(){ // Only used to sanity-check names if needed
     await loadScriptOnce("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js");
-    if (!window.XLSX) throw new Error("SheetJS failed to load");
   }
 
-  // ---------- helpers ----------
-  function colLetter(n){ let s=""; while(n){ let r=(n-1)%26; s=String.fromCharCode(65+r)+s; n=Math.floor((n-1)/26);} return s; }
-  function aoaSize(aoa){
-    const rows = aoa.length || 1;
-    const cols = aoa.reduce((m,r)=>Math.max(m, (r?.length)||0), 0) || 1;
-    return {rows, cols, endA1: `${colLetter(cols)}${rows}`};
-  }
-
-  // Build AOA from worksheet, preserving formulas: if cell.f exists, use "="+cell.f
-  function sheetToAOAWithFormulas(ws){
-    const r = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
-    const aoa = [];
-    for(let R=r.s.r; R<=r.e.r; ++R){
-      const row=[];
-      for(let C=r.s.c; C<=r.e.c; ++C){
-        const addr = XLSX.utils.encode_cell({r:R,c:C});
-        const cell = ws[addr];
-        if (!cell) { row.push(""); continue; }
-        if (cell.f != null && cell.f !== "") {
-          row.push("=" + cell.f);
-        } else {
-          // prefer displayed text; fallback to raw value
-          row.push(cell.w != null ? cell.w : (cell.v != null ? cell.v : ""));
-        }
-      }
-      aoa.push(row);
-    }
-    return aoa;
-  }
-
-  // GIS token
+  // ---------- auth via GIS ----------
   let tokenClient=null;
   function getAccessToken({forcePrompt=false}={}){
     return new Promise(async (resolve,reject)=>{
@@ -83,6 +54,113 @@
         tokenClient.requestAccessToken({ prompt: forcePrompt ? "consent" : "" });
       }catch(e){ reject(e); }
     });
+  }
+
+  // ---------- Drive helpers ----------
+  async function driveCopyTemplate(name, token){
+    const res = await gapi.client.drive.files.copy({
+      fileId: TEMPLATE_ID,
+      supportsAllDrives: true,
+      fields: "id",
+      resource: { name }
+    });
+    const id = res.result.id;
+    if (!id) throw new Error("Template copy failed.");
+    return id;
+  }
+
+  // Upload XLSX -> convert to Google Sheet using multipart/related upload
+  async function driveUploadConvertXlsx(file, token, name){
+    const boundary = "-------314159265358979323846";
+    const metadata = {
+      name: name + " (converted)",
+      mimeType: "application/vnd.google-apps.spreadsheet"
+    };
+    const body = new Blob([
+      `--${boundary}\r\n`+
+      "Content-Type: application/json; charset=UTF-8\r\n\r\n"+
+      JSON.stringify(metadata)+
+      `\r\n--${boundary}\r\n`+
+      "Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n",
+      file,
+      `\r\n--${boundary}--`
+    ], { type: `multipart/related; boundary=${boundary}` });
+
+    const url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id";
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + token },
+      body
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json?.error?.message || JSON.stringify(json));
+    if (!json.id) throw new Error("Conversion upload did not return an id.");
+    return json.id;
+  }
+
+  async function driveDelete(fileId){
+    try{
+      await gapi.client.drive.files.delete({ fileId });
+    }catch(e){ /* no-op cleanup */ }
+  }
+
+  // ---------- Sheets helpers ----------
+  async function getSheetsMeta(spreadsheetId){
+    const meta = await gapi.client.sheets.spreadsheets.get({ spreadsheetId });
+    return meta.result.sheets.map(s => s.properties); // {sheetId, title, index, ...}
+  }
+  function findSheetIdByTitle(props, title){
+    const p = props.find(p => (p.title||"").toLowerCase() === title.toLowerCase());
+    return p ? p.sheetId : null;
+  }
+
+  async function copyTabTo(targetSpreadsheetId, sourceSpreadsheetId, sourceSheetId){
+    const res = await gapi.client.sheets.spreadsheets.sheets.copyTo({
+      spreadsheetId: sourceSpreadsheetId,
+      sheetId: sourceSheetId,
+      resource: { destinationSpreadsheetId: targetSpreadsheetId }
+    });
+    return res.result.sheetId; // new sheetId in destination
+  }
+
+  async function batchUpdate(spreadsheetId, requests){
+    if (!requests.length) return;
+    await gapi.client.sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      resource: { requests }
+    });
+  }
+
+  async function replaceSheetWithCopy({
+    destId, destTitle, srcId, srcTitle
+  }){
+    const destProps = await getSheetsMeta(destId);
+    const srcProps  = await getSheetsMeta(srcId);
+
+    const srcSheetId  = findSheetIdByTitle(srcProps , srcTitle);
+    if (!srcSheetId) throw new Error(`Source sheet "${srcTitle}" not found in converted file.`);
+    const destSheetId = findSheetIdByTitle(destProps, destTitle);
+
+    // Copy source tab into destination (creates a new sheet at the end)
+    const newDestSheetId = await copyTabTo(destId, srcId, srcSheetId);
+
+    // Rename new sheet to the expected title; delete old destination sheet if present; and position new tab
+    const requests = [];
+
+    // If an old sheet with destTitle exists, delete it
+    if (destSheetId){
+      requests.push({ deleteSheet: { sheetId: destSheetId } });
+    }
+
+    // Rename the copied sheet to destTitle & move it near the front (index 0 or 1)
+    requests.push({
+      updateSheetProperties: {
+        properties: { sheetId: newDestSheetId, title: destTitle, index: 0 },
+        fields: "title,index"
+      }
+    });
+
+    await batchUpdate(destId, requests);
   }
 
   // ---------- UI ----------
@@ -103,14 +181,15 @@
 
     const content=document.createElement("div"); content.className="content"; content.style.padding="8px 0 12px";
     const note=document.createElement("div");
-    note.innerHTML="Pick the Excel you just generated (or another .xlsx). We'll copy your Google template and push all <b>Events</b> values and <b>Lists</b> values <i>including formulas</i> into it.";
+    note.innerHTML="Pick the Excel you generated. We’ll <b>convert</b> it to a temporary Google Sheet (keeping formulas & formatting), copy both tabs into your template copy, then clean up.";
     content.appendChild(note);
 
     const row=document.createElement("div");
     Object.assign(row.style,{display:"flex",flexWrap:"wrap",alignItems:"center",gap:"8px",marginTop:"8px"});
 
     const file=document.createElement("input"); file.type="file";
-    file.accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"; file.id="ts-step6-file"; row.appendChild(file);
+    file.accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    file.id="ts-step6-file"; row.appendChild(file);
 
     const name=document.createElement("input"); name.type="text"; name.placeholder="master_output (in Google)";
     name.id="ts-step6-name"; name.value="master_output"; name.style.minWidth="240px"; row.appendChild(name);
@@ -122,59 +201,39 @@
     content.appendChild(row); content.appendChild(status); host.appendChild(content);
 
     btn.addEventListener("click", async ()=>{
+      let tempId = null;
       try{
         const f=file.files?.[0]; if(!f){ status.textContent="Please choose an .xlsx file first."; return; }
 
-        status.textContent="Preparing libraries…"; await ensureGapi(); await ensureSheetJS();
+        status.textContent="Preparing libraries…"; await ensureGapi();
 
         status.textContent="Authorizing with Google…";
-        const access_token=await getAccessToken(); gapi.client.setToken({access_token});
+        const access_token = await getAccessToken(); gapi.client.setToken({ access_token });
 
+        const outName = (name.value || "master_output");
         status.textContent="Copying template…";
-        const copyRes=await gapi.client.drive.files.copy({
-          fileId:TEMPLATE_ID, supportsAllDrives:true, fields:"id",
-          resource:{ name:(name.value||"master_output")+" (in Google)" }
-        });
-        const destId=copyRes.result.id; if(!destId) throw new Error("Template copy failed.");
+        const destId = await driveCopyTemplate(outName + " (Google)");
 
-        status.textContent="Reading Excel…";
-        const buf=await f.arrayBuffer();
-        const wb=XLSX.read(buf,{type:"array"});
+        status.textContent="Uploading & converting Excel → Google Sheet…";
+        tempId = await driveUploadConvertXlsx(f, access_token, outName);
 
-        const eventsName = wb.SheetNames.find(n=>/^events$/i.test(n)) || wb.SheetNames[0];
-        const listsName  = wb.SheetNames.find(n=>/^lists$/i.test(n))  || null;
+        // Copy both tabs wholesale (preserves formulas & formatting)
+        status.textContent='Copying "Events" tab…';
+        await replaceSheetWithCopy({ destId, destTitle: "Events", srcId: tempId, srcTitle: "Events" });
 
-        // Events: values only (fast)
-        const eventsAOA = XLSX.utils.sheet_to_json(wb.Sheets[eventsName], { header:1, defval:"" });
+        status.textContent='Copying "Lists" tab…';
+        await replaceSheetWithCopy({ destId, destTitle: "Lists", srcId: tempId, srcTitle: "Lists" });
 
-        // Lists: formulas preserved
-        let listsAOA = [];
-        if (listsName) listsAOA = sheetToAOAWithFormulas(wb.Sheets[listsName]);
+        status.textContent="Cleaning up…";
+        await driveDelete(tempId); tempId = null;
 
-        status.textContent="Writing data to Google Sheet…";
-        const data=[];
-
-        if (eventsAOA.length){
-          const {rows, cols, endA1} = aoaSize(eventsAOA);
-          data.push({ range:`Events!A1:${endA1}`, majorDimension:"ROWS", values:eventsAOA });
-        }
-        if (listsAOA.length){
-          const {endA1} = aoaSize(listsAOA);
-          data.push({ range:`Lists!A1:${endA1}`, majorDimension:"ROWS", values:listsAOA });
-        }
-
-        if (data.length){
-          await gapi.client.sheets.spreadsheets.values.batchUpdate({
-            spreadsheetId: destId,
-            resource: { valueInputOption: "USER_ENTERED", data }
-          });
-        }
-
-        status.innerHTML=`✅ Done. <a target="_blank" rel="noopener" href="https://docs.google.com/spreadsheets/d/${destId}">Open your Google Sheet</a>`;
+        status.innerHTML = `✅ Done. <a target="_blank" rel="noopener" href="https://docs.google.com/spreadsheets/d/${destId}">Open your Google Sheet</a>`;
       }catch(e){
         console.error(e);
         const msg = e?.result?.error?.message || e?.details || e?.message || JSON.stringify(e);
-        status.textContent = "❌ Export failed: " + msg + (msg?.includes("idpiframe") ? " (Tip: make sure the Google sign-in pop-up wasn't blocked.)" : "");
+        status.textContent = "❌ Export failed: " + msg;
+        // try to delete temp to keep Drive tidy
+        if (tempId) driveDelete(tempId);
       }
     });
 
@@ -182,7 +241,7 @@
   }
 
   function inject(){
-    const anchor=findExportCard(); if(!anchor) return;
+    const anchor = findExportCard(); if (!anchor) return;
     anchor.parentElement.insertBefore(buildStep6Card(), anchor.nextSibling);
   }
 
