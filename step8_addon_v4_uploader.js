@@ -1,4 +1,4 @@
-// step8_addon_v4_uploader.js — Step "6) Export to Google Sheets" using GIS (v10)
+// step8_addon_v4_uploader.js — Step "6) Export to Google Sheets" using GIS (v10, UI-normalized)
 // Strategy: upload XLSX -> Google Sheet (conversion preserves formulas/formatting)
 // then copy ENTIRE tabs into a fresh copy of your template; delete temp; done.
 (function(){
@@ -179,26 +179,57 @@
     const host=document.createElement("section"); host.className="card"; host.id="ts-step6-card";
     const h2=document.createElement("h2"); h2.textContent="6) Export to Google Sheets"; host.appendChild(h2);
 
-    const content=document.createElement("div"); content.className="content"; content.style.padding="8px 0 12px";
+    const content=document.createElement("div"); content.className="content"; // no custom padding (inherit)
     const note=document.createElement("div");
-    note.innerHTML="Pick the Excel you generated. We’ll <b>convert</b> it to a temporary Google Sheet (keeping formulas & formatting), copy both tabs into your template copy, then clean up.";
+    note.innerHTML="Pick the Excel you generated. We’ll <b>convert</b> it to a temporary Google Sheet (keeping formulas &amp; formatting), copy both tabs into your template copy, then clean up.";
     content.appendChild(note);
 
+    // Match Step 5’s row container & spacing
     const row=document.createElement("div");
-    Object.assign(row.style,{display:"flex",flexWrap:"wrap",alignItems:"center",gap:"8px",marginTop:"8px"});
+    row.className="row wrap";
+    row.style.gap="12px";
+    row.style.marginTop="8px";
 
-    const file=document.createElement("input"); file.type="file";
-    file.accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-    file.id="ts-step6-file"; row.appendChild(file);
+    // File picker (label + span + input) — same pattern as Step 5 fields
+    const fileLabel = document.createElement("label");
+    const fileSpan  = document.createElement("span");
+    fileSpan.textContent = "Choose exported .xlsx";
+    const file = document.createElement("input");
+    file.type = "file";
+    file.accept = ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    file.id = "ts-step6-file";
+    fileLabel.appendChild(fileSpan);
+    fileLabel.appendChild(file);
+    row.appendChild(fileLabel);
 
-    const name=document.createElement("input"); name.type="text"; name.placeholder="master_output (in Google)";
-    name.id="ts-step6-name"; name.value="master_output"; name.style.minWidth="240px"; row.appendChild(name);
+    // Google Sheet Title (label + span + input)
+    const nameLabel = document.createElement("label");
+    const nameSpan  = document.createElement("span");
+    nameSpan.textContent = "Google Sheet Title";
+    const name = document.createElement("input");
+    name.type = "text";
+    name.placeholder = "master_output";
+    name.id = "ts-step6-name";
+    name.value = "master_output";
+    nameLabel.appendChild(nameSpan);
+    nameLabel.appendChild(name);
+    row.appendChild(nameLabel);
 
-    const btn=document.createElement("button"); btn.type="button"; btn.textContent="Export to Google Sheet"; btn.className="btn"; row.appendChild(btn);
+    // Primary action button (same styling weight as Step 5’s Generate)
+    const btn=document.createElement("button");
+    btn.type="button";
+    btn.textContent="Export to Google Sheets";
+    btn.className="btn primary";
+    row.appendChild(btn);
 
-    const status=document.createElement("div"); status.id="ts-step6-status"; status.style.marginTop="8px"; status.textContent="Ready.";
+    const status=document.createElement("div");
+    status.id="ts-step6-status";
+    status.style.marginTop="8px";
+    status.textContent="Ready.";
 
-    content.appendChild(row); content.appendChild(status); host.appendChild(content);
+    content.appendChild(row);
+    content.appendChild(status);
+    host.appendChild(content);
 
     btn.addEventListener("click", async ()=>{
       let tempId = null;
@@ -227,14 +258,13 @@
         status.textContent="Cleaning up…";
         await driveDelete(tempId); tempId = null;
 
-              // ---- success ----
+        // ---- success ----
         const gUrl = `https://docs.google.com/spreadsheets/d/${destId}`;
         status.innerHTML =
           `✅ Done. <a target="_blank" rel="noopener" href="${gUrl}">Open your Google Sheet</a>`;
 
         // Automatically open the Google Sheet in a new tab after export
         try {
-          // Small delay ensures token cleanup doesn’t block the open
           setTimeout(() => window.open(gUrl, "_blank", "noopener"), 250);
         } catch (e) {
           console.warn("Auto-open suppressed:", e);
