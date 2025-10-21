@@ -109,6 +109,7 @@
     status.textContent = "Ready.";
     content.appendChild(row);
     content.appendChild(status);
+
     host.appendChild(content);
 
     btn.addEventListener("click", async ()=>{
@@ -128,8 +129,9 @@
         status.textContent = "Copying template…";
         const copyRes = await gapi.client.drive.files.copy({
           fileId: TEMPLATE_ID,
-          resource: { name: (name.value || "master_output") + " (in Google)" },
-          fields: "id"
+          supportsAllDrives: true,
+          fields: "id",
+          resource: { name: (name.value || "master_output") + " (in Google)" }
         });
         const destId = copyRes.result.id;
         if (!destId) throw new Error("Template copy failed.");
@@ -164,9 +166,11 @@
         status.innerHTML = `✅ Done. <a target="_blank" rel="noopener" href="https://docs.google.com/spreadsheets/d/${destId}">Open your Google Sheet</a>`;
       }catch(e){
         console.error(e);
-        status.textContent = "❌ Export failed: " + (e.result?.error?.message || e.message || e);
+        const msg = e?.result?.error?.message || e?.message || JSON.stringify(e);
+        status.textContent = "❌ Export failed: " + msg;
       }
     });
+
     return host;
   }
 
