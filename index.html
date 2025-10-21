@@ -46,6 +46,12 @@
     .toast{position:fixed;right:16px;bottom:16px;padding:10px 12px;border-radius:10px;background:#122048;border:1px solid #2b3761;color:#e7ecff;box-shadow:0 6px 30px #000a;display:none}
     .visually-hidden{position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none}
   </style>
+  <style>
+    #ts-step6-card h2 { color: var(--text-strong, #cbd5e1) !important; font-size: 1.1rem !important; }
+    #ts-step6-card .content input[type="text"]{ width: 240px !important; }
+    #ts-step6-card .content input[type="file"]{ width: auto !important; }
+    #ts-step6-card .content .btn{ padding: 10px 14px !important; }
+  </style>
 <script>
 function setStatusBanner(msg){
   try {
@@ -60,13 +66,6 @@ function setStatusBanner(msg){
   } catch(e){ console.log("[3seats-export] status:", msg); }
 }
 </script>
-  <style>
-    /* Step 6 visual match to other cards */
-    #ts-step6-card h2 { color: var(--text-strong, #cbd5e1); font-size: 1.1rem; }
-    #ts-step6-card .content input[type="text"]{ width: 240px; }
-    #ts-step6-card .content input[type="file"]{ width: auto; }
-    #ts-step6-card .content .btn{ padding: 10px 14px; }
-  </style>
 </head>
 <style>
   /* Hide any Save/Load Mapping buttons anywhere on the page */
