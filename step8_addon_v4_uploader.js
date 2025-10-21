@@ -181,7 +181,22 @@
 
     const content=document.createElement("div"); content.className="content"; content.style.padding="8px 0 12px";
     const note=document.createElement("div");
-    note.innerHTML="Pick the Excel you generated. We’ll <b>convert</b> it to a temporary Google Sheet (keeping formulas & formatting), copy both tabs into your template copy, then clean up.";
+    note.innerHTML="Pick the Excel you generated. We’ll <b>convert</b> it to a temporary Google Sheet (keeping formulas & formatting), copy both tabs into your template copy, then clean up.";// style & align the note and input row uniformly
+note.style.margin = "4px 0 12px 12px";     // small indent, same left as header text
+note.style.fontSize = "0.9rem";
+note.style.lineHeight = "1.45";
+note.style.color = "#9ca3af";              // gray-400 for muted tone
+note.style.maxWidth = "95%";
+
+// tighten the input row + make fields sit side-by-side
+row.style.gap = "10px";
+row.style.margin = "0 0 8px 12px";         // indent same as note
+row.style.alignItems = "center";
+
+// narrow the inputs so both fit one line
+file.style.width = "190px";
+name.style.width = "160px";
+
     // style the explanatory line to be subtle and uniform
     note.style.margin = "0 0 8px";
     note.style.fontSize = "0.95rem";
